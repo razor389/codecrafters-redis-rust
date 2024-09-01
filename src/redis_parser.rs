@@ -1,5 +1,5 @@
 pub fn parse_redis_message(message: &str) -> String {
-    // Remove leading whitespace, but not trailing, to preserve the ECHO message as-is
+    // Remove leading whitespace to correctly identify the command
     let message = message.trim_start();
 
     // Split the message into two parts: the command and the rest
