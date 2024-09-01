@@ -1,5 +1,10 @@
 #![allow(unused_imports)]
-use std::net::TcpListener;
+use std::{io::Write, net::{TcpListener, TcpStream}};
+
+fn handle_client(stream: &mut std::net::TcpStream) {
+    // handle client here
+    stream.write("+PONG\r\n".as_bytes()).unwrap();
+}
 
 fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
@@ -9,10 +14,11 @@ fn main() {
     //
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
     
-    for stream in listener.incoming() {
+    for mut stream in listener.incoming() {
         match stream {
-            Ok(_stream) => {
+            Ok(ref mut stream) => {
                 println!("accepted new connection");
+                handle_client(stream);
             }
             Err(e) => {
                 println!("error: {}", e);
