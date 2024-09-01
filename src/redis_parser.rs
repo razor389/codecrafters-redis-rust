@@ -1,5 +1,5 @@
 pub fn parse_redis_message(message: &str) -> String {
-    // Remove leading and trailing whitespace but don't trim the entire message
+    // Remove leading whitespace, but not trailing, to preserve the ECHO message as-is
     let message = message.trim_start();
 
     // Split the message into two parts: the command and the rest
@@ -11,11 +11,13 @@ pub fn parse_redis_message(message: &str) -> String {
         "ECHO" => {
             // Preserve the entire remaining part of the message after "ECHO"
             let echo_message = parts.next().unwrap_or("");
-            format!("+{}\r\n", echo_message)
+            // Return as a bulk string
+            format!("${}\r\n{}\r\n", echo_message.len(), echo_message)
         }
         _ => "-ERR unknown command\r\n".to_string(),
     }
 }
+
 
 #[cfg(test)]
 mod tests {
