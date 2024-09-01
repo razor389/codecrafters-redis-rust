@@ -1,13 +1,15 @@
 pub fn parse_redis_message(message: &str) -> Option<String> {
-    //we want our commands to be case-insensitive
-    //so we convert the message to uppercase
-    match message.trim() {
+    // We want our commands to be case-insensitive
+    // So we convert the message to uppercase
+    // But not the whole message, only the command part
+    let mut parts = message.split_whitespace();
+    let command = parts.next()?.to_uppercase();
+
+    match command.as_str() {
         "PING" => Some("+PONG\r\n".to_string()),
-        //for ECHO command we need to return the message itself
-        //we can use the format! macro to create a new string
-        //with the message
-        message if message.starts_with("ECHO") => {
-            let echo_message = message.trim_start_matches("ECHO ");
+        "ECHO" => {
+            // Reconstruct the remaining part of the message after "ECHO"
+            let echo_message: String = parts.collect::<Vec<&str>>().join(" ");
             Some(format!("+{}\r\n", echo_message))
         }
         _ => None, // Handle other commands or return None if the command is unknown
