@@ -1,7 +1,7 @@
 #![allow(unused_imports)]
 use std::{io::{self, Read, Write}, net::{TcpListener, TcpStream}, thread};
 
-
+mod redis_parser;
 
 fn handle_client(stream: &mut std::net::TcpStream)->io::Result<()> {
     // handle client here
@@ -25,9 +25,9 @@ fn handle_client(stream: &mut std::net::TcpStream)->io::Result<()> {
             let remaining_part = &partial_message[last_newline_idx + 1..];
 
             for message in complete_messages.split('\n') {
-                if message.trim() == "PING" {
-                    // Respond with "+PONG\r\n"
-                    stream.write_all(b"+PONG\r\n")?;
+                if let Some(response) = redis_parser::parse_redis_message(message) {
+                    // Respond with the parsed Redis response
+                    stream.write_all(response.as_bytes())?;
                     stream.flush()?;
                 }
             }
