@@ -1,5 +1,5 @@
 #![allow(unused_imports)]
-use std::{io::{self, Read, Write}, net::{TcpListener, TcpStream}};
+use std::{io::{self, Read, Write}, net::{TcpListener, TcpStream}, thread};
 
 
 
@@ -47,14 +47,16 @@ fn main() {
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
     
     for mut stream in listener.incoming() {
-        match stream {
-            Ok(ref mut stream) => {
-                println!("accepted new connection");
-                let _ = handle_client(stream);
+        thread::spawn(move || {
+            match stream {
+                Ok(ref mut stream) => {
+                    println!("accepted new connection");
+                    let _ = handle_client(stream);
+                }
+                Err(e) => {
+                    println!("error: {}", e);
+                }
             }
-            Err(e) => {
-                println!("error: {}", e);
-            }
-        }
+        });
     }
 }
