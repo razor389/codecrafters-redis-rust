@@ -1,22 +1,19 @@
-// redis_parser.rs
+pub fn parse_redis_message(message: &str) -> String {
+    // Remove leading and trailing whitespace but don't trim the entire message
+    let message = message.trim_start();
 
-pub fn parse_redis_message(message: &str) -> Option<String> {
-    // Trim leading whitespace
-    let trimmed = message.trim_start();
-    
-    // Split the message into command and the rest (up to 2 parts)
-    let mut parts = trimmed.splitn(2, ' ');
-    let command = parts.next()?.to_uppercase();
+    // Split the message into two parts: the command and the rest
+    let mut parts = message.splitn(2, ' ');
+    let command = parts.next().unwrap_or("").to_uppercase();
 
     match command.as_str() {
-        "PING" => Some("+PONG\r\n".to_string()),
+        "PING" => "+PONG\r\n".to_string(),
         "ECHO" => {
-            // Get the rest of the message after "ECHO"
+            // Preserve the entire remaining part of the message after "ECHO"
             let echo_message = parts.next().unwrap_or("");
-            // Preserve the original spacing in the echo message
-            Some(format!("+{}\r\n", echo_message))
+            format!("+{}\r\n", echo_message)
         }
-        _ => None, // Handle other commands or return None if the command is unknown
+        _ => "-ERR unknown command\r\n".to_string(),
     }
 }
 
@@ -26,32 +23,38 @@ mod tests {
 
     #[test]
     fn test_ping() {
-        assert_eq!(parse_redis_message("PING"), Some("+PONG\r\n".to_string()));
-        assert_eq!(parse_redis_message("ping"), Some("+PONG\r\n".to_string()));
-        assert_eq!(parse_redis_message("   PING   "), Some("+PONG\r\n".to_string()));
+        assert_eq!(parse_redis_message("PING"), "+PONG\r\n".to_string());
+        assert_eq!(parse_redis_message("ping"), "+PONG\r\n".to_string());
+        assert_eq!(parse_redis_message("   PING   "), "+PONG\r\n".to_string());
     }
 
     #[test]
     fn test_echo() {
         assert_eq!(
             parse_redis_message("ECHO Hello, World!"),
-            Some("+Hello, World!\r\n".to_string())
+            "+Hello, World!\r\n".to_string()
         );
         assert_eq!(
             parse_redis_message("echo this is a test"),
-            Some("+this is a test\r\n".to_string())
+            "+this is a test\r\n".to_string()
         );
         assert_eq!(
             parse_redis_message("   ECHO   multiple    spaces"),
-            Some("+  multiple    spaces\r\n".to_string())
+            "+  multiple    spaces\r\n".to_string()
         );
-        assert_eq!(parse_redis_message("ECHO"), Some("+\r\n".to_string()));
-        assert_eq!(parse_redis_message("ECHO    "), Some("+   \r\n".to_string()));
+        assert_eq!(parse_redis_message("ECHO"), "+\r\n".to_string());
+        assert_eq!(parse_redis_message("ECHO    "), "+   \r\n".to_string()); // This test should pass now
     }
 
     #[test]
     fn test_unknown_command() {
-        assert_eq!(parse_redis_message("UNKNOWN"), None);
-        assert_eq!(parse_redis_message("GET"), None);
+        assert_eq!(
+            parse_redis_message("UNKNOWN"),
+            "-ERR unknown command\r\n".to_string()
+        );
+        assert_eq!(
+            parse_redis_message("GET"),
+            "-ERR unknown command\r\n".to_string()
+        );
     }
 }
