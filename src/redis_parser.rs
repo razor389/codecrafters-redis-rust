@@ -30,6 +30,7 @@ impl RedisValue {
     }
 }
 
+
 fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
     let mut file = fs::File::open(file_path)?;
     let mut buffer = Vec::new();
@@ -96,8 +97,7 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
                 println!("Size encoded with 32 bits: {}", size);
                 size
             }
-            0b11 => return Err(io::Error::new(io::ErrorKind::InvalidData, "Unexpected string encoding type")),
-            _ => unreachable!(),
+            _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "Unexpected string encoding type")),
         };
         Ok(size)
     }
@@ -105,7 +105,7 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
     // Helper to read a string-encoded value
     fn read_string(buffer: &[u8], cursor: &mut usize) -> io::Result<String> {
         let first_byte = read_u8(buffer, cursor)?;
-    
+
         // Check if the size encoding indicates an integer or compressed data
         if (first_byte & 0xC0) == 0xC0 {
             match first_byte {
@@ -145,9 +145,9 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
                 0b10 => read_uint_le(buffer, cursor, 4)?,
                 _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "Unexpected string encoding type")),
             };
-    
+
             println!("String size: {}", size);
-    
+
             let string_bytes = &buffer[*cursor..*cursor + size as usize];
             *cursor += size as usize;
             let result = String::from_utf8_lossy(string_bytes).into_owned();
@@ -155,7 +155,6 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
             Ok(result)
         }
     }
-    
 
     // Step 1: Read and validate the header
     let header = &buffer[0..9];
@@ -181,7 +180,7 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
         }
     }
 
-    // Iterate over the data
+    // Step 3: Handle database sections and keys
     while let Ok(byte) = read_u8(&buffer, &mut cursor) {
         println!("Processing byte: {:02X} at cursor {}", byte, cursor - 1);
         match byte {
@@ -194,6 +193,20 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
                 // Expiration timestamp in milliseconds
                 let expire_timestamp = read_uint_le(&buffer, &mut cursor, 8)?;
                 println!("Expiration timestamp (milliseconds): {}", expire_timestamp);
+            }
+            0xFE => {
+                // Start of a database subsection
+                println!("Start of database subsection");
+                let db_index = decode_size(&buffer, &mut cursor)?;
+                println!("Database index: {}", db_index);
+            }
+            0xFB => {
+                // Hash table size information
+                println!("Start of hash table size information");
+                let key_table_size = decode_size(&buffer, &mut cursor)?;
+                let expire_table_size = decode_size(&buffer, &mut cursor)?;
+                println!("Key hash table size: {}", key_table_size);
+                println!("Expire hash table size: {}", expire_table_size);
             }
             0x00 | 0x01 | 0x02 | 0x03 => {
                 // Value type (0 = string, other values may represent other types)
@@ -219,7 +232,6 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
 
     Ok(keys)
 }
-
 
 
 pub fn parse_redis_message(
