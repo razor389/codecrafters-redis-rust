@@ -228,6 +228,7 @@ pub fn parse_redis_message(
                         if rdb_path.exists() {
                             match parse_rdb_file(rdb_path.to_str().unwrap()) {
                                 Ok(keys) => {
+                                    println!("{:?}", keys);
                                     let mut response = format!("*{}\r\n", keys.len());
                                     for key in keys {
                                         response.push_str(&format!("${}\r\n{}\r\n", key.len(), key));
