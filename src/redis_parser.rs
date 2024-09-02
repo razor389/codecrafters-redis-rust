@@ -35,16 +35,6 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;
 
-    // Print buffer byte by byte in hexadecimal format
-    for (i, byte) in buffer.iter().enumerate() {
-        print!("{:02X} ", byte);
-        if (i + 1) % 16 == 0 {
-            println!(); // New line every 16 bytes for readability
-        }
-    }
-    println!(); // Ensure the last line ends properly
-
-
     let mut keys = Vec::new();
     let mut cursor = 0;
 
@@ -59,90 +49,70 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
         }
     }
 
-    // Helper to read an 8-byte little-endian integer
-    fn read_u64_le(buffer: &[u8], cursor: &mut usize) -> io::Result<u64> {
-        if *cursor + 8 <= buffer.len() {
+    // Helper to read an n-byte little-endian integer
+    fn read_uint_le(buffer: &[u8], cursor: &mut usize, n: usize) -> io::Result<u64> {
+        if *cursor + n <= buffer.len() {
             let mut value = 0u64;
-            for i in 0..8 {
+            for i in 0..n {
                 value |= (buffer[*cursor + i] as u64) << (i * 8);
             }
-            *cursor += 8;
+            *cursor += n;
             Ok(value)
         } else {
             Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Reached end of buffer"))
         }
     }
 
-    // Helper to read a 4-byte little-endian integer
-    fn read_u32_le(buffer: &[u8], cursor: &mut usize) -> io::Result<u32> {
-        if *cursor + 4 <= buffer.len() {
-            let mut value = 0u32;
-            for i in 0..4 {
-                value |= (buffer[*cursor + i] as u32) << (i * 8);
+    // Helper to decode the size-encoded values
+    fn decode_size(buffer: &[u8], cursor: &mut usize) -> io::Result<u64> {
+        let first_byte = read_u8(buffer, cursor)?;
+
+        let size = match first_byte >> 6 {
+            0b00 => u64::from(first_byte & 0x3F),
+            0b01 => {
+                let second_byte = read_u8(buffer, cursor)?;
+                u64::from(first_byte & 0x3F) << 8 | u64::from(second_byte)
             }
-            *cursor += 4;
-            Ok(value)
-        } else {
-            Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Reached end of buffer"))
-        }
+            0b10 => read_uint_le(buffer, cursor, 4)?,
+            0b11 => return Err(io::Error::new(io::ErrorKind::InvalidData, "Unexpected string encoding type")),
+            _ => unreachable!(),
+        };
+        Ok(size)
+    }
+
+    // Helper to read a string-encoded value
+    fn read_string(buffer: &[u8], cursor: &mut usize) -> io::Result<String> {
+        let size = decode_size(buffer, cursor)?;
+
+        let string_bytes = &buffer[*cursor..*cursor + size as usize];
+        *cursor += size as usize;
+        Ok(String::from_utf8_lossy(string_bytes).into_owned())
     }
 
     // Iterate over the data
     while let Ok(byte) = read_u8(&buffer, &mut cursor) {
         match byte {
-            0xFE => {
-                // Start of the database subsection, followed by the database index
-                let _db_index = read_u8(&buffer, &mut cursor)?;
-            }
-            0xFB => {
-                // Hash table size information
-                let _key_table_size = read_u8(&buffer, &mut cursor)?;
-                let _expire_table_size = read_u8(&buffer, &mut cursor)?;
-            }
-            0x00 => {
-                // Value type and encoding (0 = string)
-                let key_len = read_u8(&buffer, &mut cursor)? as usize;
-                let key = &buffer[cursor..cursor + key_len];
-                cursor += key_len;
-
-                let value_len = read_u8(&buffer, &mut cursor)? as usize;
-                let _value = &buffer[cursor..cursor + value_len];
-                cursor += value_len;
-
-                keys.push(String::from_utf8_lossy(key).into_owned());
+            0xFD => {
+                // Expiration timestamp in seconds
+                let _expire_timestamp = read_uint_le(&buffer, &mut cursor, 4)?;
             }
             0xFC => {
-                // Key with expire in milliseconds
-                let _expire_timestamp = read_u64_le(&buffer, &mut cursor)?;
-                let _value_type = read_u8(&buffer, &mut cursor)?;
-
-                let key_len = read_u8(&buffer, &mut cursor)? as usize;
-                let key = &buffer[cursor..cursor + key_len];
-                cursor += key_len;
-
-                let value_len = read_u8(&buffer, &mut cursor)? as usize;
-                let _value = &buffer[cursor..cursor + value_len];
-                cursor += value_len;
-
-                keys.push(String::from_utf8_lossy(key).into_owned());
+                // Expiration timestamp in milliseconds
+                let _expire_timestamp = read_uint_le(&buffer, &mut cursor, 8)?;
             }
-            0xFD => {
-                // Key with expire in seconds
-                let _expire_timestamp = read_u32_le(&buffer, &mut cursor)?;
-                let _value_type = read_u8(&buffer, &mut cursor)?;
-
-                let key_len = read_u8(&buffer, &mut cursor)? as usize;
-                let key = &buffer[cursor..cursor + key_len];
-                cursor += key_len;
-
-                let value_len = read_u8(&buffer, &mut cursor)? as usize;
-                let _value = &buffer[cursor..cursor + value_len];
-                cursor += value_len;
-
-                keys.push(String::from_utf8_lossy(key).into_owned());
+            0x00 | 0x01 | 0x02 | 0x03 => {
+                // Value type (0 = string, other values may represent other types)
+                let key = read_string(&buffer, &mut cursor)?;
+                let _value = read_string(&buffer, &mut cursor)?;
+                keys.push(key);
+            }
+            0xFF => {
+                // End of file section
+                // Read and skip the 8-byte checksum
+                cursor += 8;
+                break;
             }
             _ => {
-                // Unknown or unhandled byte
                 return Err(io::Error::new(io::ErrorKind::InvalidData, "Unknown byte in RDB file"));
             }
         }
@@ -150,7 +120,6 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
 
     Ok(keys)
 }
-
 
 pub fn parse_redis_message(
     message: &str,
