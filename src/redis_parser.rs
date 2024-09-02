@@ -30,6 +30,7 @@ impl RedisValue {
 pub fn parse_redis_message(
     message: &str,
     hashmap: &mut HashMap<String, RedisValue>,
+    config_map: &HashMap<String, String>,
 ) -> String {
     let mut lines = message.lines();
 
@@ -40,12 +41,11 @@ pub fn parse_redis_message(
 
             while let Some(line) = lines.next() {
                 if line.starts_with('$') {
-                    // Skip the length line and go to the actual data
                     if let Some(arg) = lines.next() {
                         if command.is_none() {
-                            command = Some(arg.to_uppercase());  // Set the command
+                            command = Some(arg.to_uppercase());
                         } else {
-                            args.push(arg.to_string());  // Set the argument
+                            args.push(arg.to_string());
                         }
                     }
                 }
@@ -55,7 +55,6 @@ pub fn parse_redis_message(
                 Some("PING") => "+PONG\r\n".to_string(),
                 Some("ECHO") => {
                     if let Some(echo_message) = args.get(0) {
-                        // Return the argument as a bulk string
                         format!("${}\r\n{}\r\n", echo_message.len(), echo_message)
                     } else {
                         "-ERR missing argument\r\n".to_string()
@@ -92,6 +91,17 @@ pub fn parse_redis_message(
                         }
                     } else {
                         "-ERR wrong number of arguments for 'get' command\r\n".to_string()
+                    }
+                },
+                Some("CONFIG") => {
+                    if args.len() == 2 && args[0].to_uppercase() == "GET" {
+                        if let Some(value) = config_map.get(&args[1]) {
+                            format!("*2\r\n${}\r\n{}\r\n${}\r\n{}\r\n", args[1].len(), args[1], value.len(), value)
+                        } else {
+                            "$-1\r\n".to_string()
+                        }
+                    } else {
+                        "-ERR syntax error\r\n".to_string()
                     }
                 },
                 _ => "-ERR unknown command\r\n".to_string(),
