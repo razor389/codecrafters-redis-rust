@@ -8,6 +8,7 @@ mod redis_parser;
 pub fn handle_client(stream: &mut TcpStream) -> io::Result<()> {
     let mut buffer = [0; 512];
     let mut partial_message = String::new();
+    let mut hashmap = std::collections::HashMap::new();
 
     loop {
         // Read data from the stream into the buffer
@@ -26,7 +27,7 @@ pub fn handle_client(stream: &mut TcpStream) -> io::Result<()> {
         // Check if the partial message contains a full RESP command
         if partial_message.ends_with("\r\n") {
             // Now parse the full message
-            let response = parse_redis_message(&partial_message);
+            let response = parse_redis_message(&partial_message, &mut hashmap);
             stream.write_all(response.as_bytes())?;
             stream.flush()?;
             partial_message.clear(); // Clear the message buffer after processing
