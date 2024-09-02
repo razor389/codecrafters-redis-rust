@@ -1,22 +1,40 @@
 pub fn parse_redis_message(message: &str) -> String {
-    // Remove leading whitespace to correctly identify the command
-    let message = message.trim_start();
+    let mut lines = message.lines();
 
-    // Split the message into two parts: the command and the rest
-    let mut parts = message.splitn(2, ' ');
-    let command = parts.next().unwrap_or("").to_uppercase();
+    match lines.next() {
+        Some(line) if line.starts_with('*') => {
+            // Handle RESP array format
+            let mut command = String::new();
+            let mut args = Vec::new();
 
-    match command.as_str() {
-        "PING" => "+PONG\r\n".to_string(),
-        "ECHO" => {
-            // Preserve the entire remaining part of the message after "ECHO"
-            let echo_message = parts.next().unwrap_or("");
-            // Return as a bulk string
-            format!("${}\r\n{}\r\n", echo_message.len(), echo_message)
+            while let Some(line) = lines.next() {
+                if line.starts_with('$') {
+                    if let Some(arg) = lines.next() {
+                        if command.is_empty() {
+                            command = arg.to_uppercase();
+                        } else {
+                            args.push(arg.to_string());
+                        }
+                    }
+                }
+            }
+
+            match command.as_str() {
+                "PING" => "+PONG\r\n".to_string(),
+                "ECHO" => {
+                    if let Some(echo_message) = args.get(0) {
+                        format!("${}\r\n{}\r\n", echo_message.len(), echo_message)
+                    } else {
+                        "-ERR missing argument\r\n".to_string()
+                    }
+                }
+                _ => "-ERR unknown command\r\n".to_string(),
+            }
         }
-        _ => "-ERR unknown command\r\n".to_string(),
+        _ => "-ERR invalid format\r\n".to_string(),
     }
 }
+
 
 
 #[cfg(test)]
@@ -25,37 +43,38 @@ mod tests {
 
     #[test]
     fn test_ping() {
-        assert_eq!(parse_redis_message("PING"), "+PONG\r\n".to_string());
-        assert_eq!(parse_redis_message("ping"), "+PONG\r\n".to_string());
-        assert_eq!(parse_redis_message("   PING   "), "+PONG\r\n".to_string());
+        // RESP format for PING command
+        assert_eq!(parse_redis_message("*1\r\n$4\r\nPING\r\n"), "+PONG\r\n".to_string());
     }
 
     #[test]
     fn test_echo() {
+        // RESP format for ECHO command
         assert_eq!(
-            parse_redis_message("ECHO Hello, World!"),
-            "+Hello, World!\r\n".to_string()
+            parse_redis_message("*2\r\n$4\r\nECHO\r\n$13\r\nHello, World!\r\n"),
+            "$13\r\nHello, World!\r\n".to_string()
         );
         assert_eq!(
-            parse_redis_message("echo this is a test"),
-            "+this is a test\r\n".to_string()
+            parse_redis_message("*2\r\n$4\r\nECHO\r\n$14\r\nthis is a test\r\n"),
+            "$14\r\nthis is a test\r\n".to_string()
         );
         assert_eq!(
-            parse_redis_message("   ECHO   multiple    spaces"),
-            "+  multiple    spaces\r\n".to_string()
+            parse_redis_message("*2\r\n$4\r\nECHO\r\n$20\r\n  multiple    spaces\r\n"),
+            "$20\r\n  multiple    spaces\r\n".to_string()
         );
-        assert_eq!(parse_redis_message("ECHO"), "+\r\n".to_string());
-        assert_eq!(parse_redis_message("ECHO    "), "+   \r\n".to_string()); // This test should pass now
+        assert_eq!(parse_redis_message("*2\r\n$4\r\nECHO\r\n$0\r\n\r\n"), "$0\r\n\r\n".to_string());
+        assert_eq!(parse_redis_message("*2\r\n$4\r\nECHO\r\n$3\r\n   \r\n"), "$3\r\n   \r\n".to_string()); 
     }
 
     #[test]
     fn test_unknown_command() {
+        // RESP format for unknown command
         assert_eq!(
-            parse_redis_message("UNKNOWN"),
+            parse_redis_message("*1\r\n$7\r\nUNKNOWN\r\n"),
             "-ERR unknown command\r\n".to_string()
         );
         assert_eq!(
-            parse_redis_message("GET"),
+            parse_redis_message("*1\r\n$3\r\nGET\r\n"),
             "-ERR unknown command\r\n".to_string()
         );
     }
