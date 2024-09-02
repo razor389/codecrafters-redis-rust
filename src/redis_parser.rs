@@ -79,6 +79,7 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
 
     // Iterate over the data
     while let Ok(byte) = read_u8(&buffer, &mut cursor) {
+        println!("byte: {}", byte);
         match byte {
             0xFE => {
                 // Start of the database subsection, followed by the database index
@@ -228,7 +229,6 @@ pub fn parse_redis_message(
                         if rdb_path.exists() {
                             match parse_rdb_file(rdb_path.to_str().unwrap()) {
                                 Ok(keys) => {
-                                    println!("{:?}", keys);
                                     let mut response = format!("*{}\r\n", keys.len());
                                     for key in keys {
                                         response.push_str(&format!("${}\r\n{}\r\n", key.len(), key));
