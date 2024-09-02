@@ -34,6 +34,15 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
     let mut file = fs::File::open(file_path)?;
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;
+    
+     // Print buffer byte by byte in hexadecimal format
+     for (i, byte) in buffer.iter().enumerate() {
+        print!("{:02X} ", byte);
+        if (i + 1) % 16 == 0 {
+            println!(); // New line every 16 bytes for readability
+        }
+    }
+    println!(); // Ensure the last line ends properly
 
     println!("RDB file read successfully. Size: {} bytes", buffer.len());
     
