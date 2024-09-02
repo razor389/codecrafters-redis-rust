@@ -119,7 +119,7 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
     let header_str = String::from_utf8_lossy(header);
     println!("Header: {}", header_str);
 
-    if &header_str != "REDIS0007" {
+    if &header_str != "REDIS0003" {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid RDB file header"));
     }
     cursor += 9;
