@@ -34,9 +34,9 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
     let mut file = fs::File::open(file_path)?;
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;
-    
-     // Print buffer byte by byte in hexadecimal format
-     for (i, byte) in buffer.iter().enumerate() {
+
+    // Print buffer byte by byte in hexadecimal format
+    for (i, byte) in buffer.iter().enumerate() {
         print!("{:02X} ", byte);
         if (i + 1) % 16 == 0 {
             println!(); // New line every 16 bytes for readability
@@ -114,6 +114,30 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
         Ok(result)
     }
 
+    // Step 1: Read and validate the header
+    let header = &buffer[0..9];
+    let header_str = String::from_utf8_lossy(header);
+    println!("Header: {}", header_str);
+
+    if &header_str != "REDIS0007" {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid RDB file header"));
+    }
+    cursor += 9;
+
+    // Step 2: Handle metadata sections
+    while let Ok(byte) = read_u8(&buffer, &mut cursor) {
+        if byte == 0xFA {
+            // Start of metadata subsection
+            let meta_key = read_string(&buffer, &mut cursor)?;
+            let meta_value = read_string(&buffer, &mut cursor)?;
+            println!("Metadata: {} -> {}", meta_key, meta_value);
+        } else {
+            // Stop reading metadata when a non-metadata byte is encountered
+            cursor -= 1; // Move back one byte
+            break;
+        }
+    }
+
     // Iterate over the data
     while let Ok(byte) = read_u8(&buffer, &mut cursor) {
         println!("Processing byte: {:02X} at cursor {}", byte, cursor - 1);
@@ -152,6 +176,7 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
 
     Ok(keys)
 }
+
 
 
 pub fn parse_redis_message(
