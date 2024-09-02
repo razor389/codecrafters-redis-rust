@@ -1,5 +1,8 @@
 use std::collections::HashMap;
+use std::fs;
+use std::io::{self, Read};
 use std::time::{SystemTime, Duration};
+use std::path::Path;
 
 #[derive(Debug)]
 pub struct RedisValue {
@@ -27,6 +30,22 @@ impl RedisValue {
     }
 }
 
+// Helper function to parse the .rdb file and extract keys
+fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
+    let mut file = fs::File::open(file_path)?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+
+    // Placeholder: Implement the actual .rdb parsing logic here
+    // For demonstration, let's assume the keys are stored in a simple format
+    let keys = buffer.split(|&b| b == b'\n')
+        .map(|line| String::from_utf8_lossy(line).into_owned())
+        .filter(|line| !line.is_empty())
+        .collect();
+
+    Ok(keys)
+}
+
 pub fn parse_redis_message(
     message: &str,
     hashmap: &mut HashMap<String, RedisValue>,
@@ -50,12 +69,6 @@ pub fn parse_redis_message(
                     }
                 }
             }
-
-            // Debugging output
-            // if let Some(ref cmd) = command {
-            //     println!("Parsed Command: {}", cmd);
-            // }
-            // println!("Parsed Arguments: {:?}", args);
 
             match command.as_deref() {
                 Some("PING") => "+PONG\r\n".to_string(),
@@ -110,6 +123,30 @@ pub fn parse_redis_message(
                         "-ERR syntax error\r\n".to_string()
                     }
                 },
+                Some("KEYS") => {
+                    if args.len() == 1 {
+                        let db_dir = config_map.get("dir").map(|s| s.as_str()).unwrap_or(".");
+                        let db_filename = config_map.get("dbfilename").map(|s| s.as_str()).unwrap_or("dump.rdb");
+                        let rdb_path = Path::new(db_dir).join(db_filename);
+
+                        if rdb_path.exists() {
+                            match parse_rdb_file(rdb_path.to_str().unwrap()) {
+                                Ok(keys) => {
+                                    let mut response = format!("*{}\r\n", keys.len());
+                                    for key in keys {
+                                        response.push_str(&format!("${}\r\n{}\r\n", key.len(), key));
+                                    }
+                                    response
+                                }
+                                Err(_) => "-ERR failed to parse .rdb file\r\n".to_string(),
+                            }
+                        } else {
+                            "$-1\r\n".to_string()
+                        }
+                    } else {
+                        "-ERR wrong number of arguments for 'keys' command\r\n".to_string()
+                    }
+                },
                 _ => "-ERR unknown command\r\n".to_string(),
             }
         } else {
@@ -119,3 +156,4 @@ pub fn parse_redis_message(
         "-ERR empty message\r\n".to_string()
     }
 }
+
