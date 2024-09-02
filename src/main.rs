@@ -55,13 +55,20 @@ fn main() {
 
     let mut i = 1; // Start at 1 to skip the program name
     while i < args.len() {
-        if i + 1 < args.len() {
-            let key = args[i].clone();
-            let value = args[i + 1].clone();
-            config_map.insert(key, value);
-            i += 2;
+        let key = &args[i];
+
+        if key.starts_with("--") {
+            if i + 1 < args.len() {
+                let value = args[i + 1].clone();
+                let key = key[2..].to_string(); // Strip the "--" prefix
+                config_map.insert(key, value);
+                i += 2;
+            } else {
+                eprintln!("Missing value for key: {}", key);
+                break;
+            }
         } else {
-            eprintln!("Missing value for key: {}", args[i]);
+            eprintln!("Invalid argument format: {}", key);
             break;
         }
     }
