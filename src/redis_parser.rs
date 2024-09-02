@@ -32,7 +32,10 @@ pub fn parse_redis_message(message: &str) -> String {
                         "-ERR missing argument\r\n".to_string()
                     }
                 }
-                _ => "-ERR unknown command\r\n".to_string(),
+                _ => {
+                    println!("Unknown command: {:?}", command);
+                    "-ERR unknown command\r\n".to_string()
+                },
             }
         } else {
             "-ERR invalid format\r\n".to_string()
