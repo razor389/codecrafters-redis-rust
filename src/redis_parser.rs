@@ -1,6 +1,9 @@
 pub fn parse_redis_message(message: &str) -> String {
     let mut lines = message.lines();
-
+    println!("Message received: {:?}", message);
+    for line in lines.clone() {
+        println!("Line: {:?}", line);
+    }
     // Ensure we are dealing with a RESP array
     if let Some(line) = lines.next() {
         if !line.starts_with('*') {
