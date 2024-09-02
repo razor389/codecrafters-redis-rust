@@ -220,7 +220,8 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
                 // End of file section
                 println!("End of file detected.");
                 // Read and skip the 8-byte checksum
-                cursor += 8;
+                // Remove the assignment statement
+                // cursor += 8;
                 break;
             }
             _ => {
