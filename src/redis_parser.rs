@@ -51,6 +51,12 @@ pub fn parse_redis_message(
                 }
             }
 
+            // Debugging output
+            if let Some(ref cmd) = command {
+                println!("Parsed Command: {}", cmd);
+            }
+            println!("Parsed Arguments: {:?}", args);
+
             match command.as_deref() {
                 Some("PING") => "+PONG\r\n".to_string(),
                 Some("ECHO") => {
