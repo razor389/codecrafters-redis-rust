@@ -1,14 +1,16 @@
 pub fn parse_redis_message(message: &str) -> String {
     let mut lines = message.lines();
-
-    match lines.next() {
-        Some(line) if line.starts_with('*') => {
-            // Handle RESP array format
+    
+    if let Some(line) = lines.next() {
+        if line.starts_with('*') {
+            // Extract the number of elements (not needed for this case but we should handle it)
+            let _num_elements = line[1..].parse::<usize>().unwrap_or(0);
             let mut command = String::new();
             let mut args = Vec::new();
 
             while let Some(line) = lines.next() {
                 if line.starts_with('$') {
+                    // Skip the line indicating the length of the next bulk string
                     if let Some(arg) = lines.next() {
                         if command.is_empty() {
                             command = arg.to_uppercase();
@@ -30,11 +32,13 @@ pub fn parse_redis_message(message: &str) -> String {
                 }
                 _ => "-ERR unknown command\r\n".to_string(),
             }
+        } else {
+            "-ERR invalid format\r\n".to_string()
         }
-        _ => "-ERR invalid format\r\n".to_string(),
+    } else {
+        "-ERR empty message\r\n".to_string()
     }
 }
-
 
 
 #[cfg(test)]
