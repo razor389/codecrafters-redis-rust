@@ -3,37 +3,36 @@ pub fn parse_redis_message(message: &str) -> String {
     
     if let Some(line) = lines.next() {
         if line.starts_with('*') {
-            // Extract the number of elements (not needed for this case but we should handle it)
+            // Parse the number of elements in the array (though we don't need to use this)
             let _num_elements = line[1..].parse::<usize>().unwrap_or(0);
-            let mut command = String::new();
+            let mut command = None;
             let mut args = Vec::new();
 
             while let Some(line) = lines.next() {
                 if line.starts_with('$') {
                     // Skip the line indicating the length of the next bulk string
                     if let Some(arg) = lines.next() {
-                        if command.is_empty() {
-                            command = arg.to_uppercase();
+                        if command.is_none() {
+                            // Set the command if not already set
+                            command = Some(arg.to_uppercase());
                         } else {
+                            // Add the argument to the list
                             args.push(arg.to_string());
                         }
                     }
                 }
             }
 
-            match command.as_str() {
-                "PING" => "+PONG\r\n".to_string(),
-                "ECHO" => {
+            match command.as_deref() {
+                Some("PING") => "+PONG\r\n".to_string(),
+                Some("ECHO") => {
                     if let Some(echo_message) = args.get(0) {
-                        format!("${}\r\n{}\r\n", echo_message.len(), echo_message)
+                        format!("{}\r\n", echo_message)
                     } else {
                         "-ERR missing argument\r\n".to_string()
                     }
                 }
-                _ => {
-                    println!("{}", command.as_str()); 
-                    "-ERR unknown command\r\n".to_string()
-                },
+                _ => "-ERR unknown command\r\n".to_string(),
             }
         } else {
             "-ERR invalid format\r\n".to_string()
