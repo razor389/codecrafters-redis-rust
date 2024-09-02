@@ -1,6 +1,36 @@
 use std::collections::HashMap;
+use std::time::{SystemTime, Duration};
 
-pub fn parse_redis_message(message: &str, hashmap: &mut HashMap<String, String>) -> String {
+#[derive(Debug)]
+pub struct RedisValue {
+    value: String,
+    creation_time: SystemTime,
+    ttl: Option<Duration>,
+}
+
+impl RedisValue {
+    fn new(value: String, ttl: Option<u64>) -> Self {
+        let ttl_duration = ttl.map(Duration::from_millis);
+        RedisValue {
+            value,
+            creation_time: SystemTime::now(),
+            ttl: ttl_duration,
+        }
+    }
+
+    fn is_expired(&self) -> bool {
+        if let Some(ttl) = self.ttl {
+            self.creation_time.elapsed().unwrap_or(Duration::from_secs(0)) > ttl
+        } else {
+            false
+        }
+    }
+}
+
+pub fn parse_redis_message(
+    message: &str,
+    hashmap: &mut HashMap<String, RedisValue>,
+) -> String {
     let mut lines = message.lines();
 
     if let Some(line) = lines.next() {
@@ -33,8 +63,16 @@ pub fn parse_redis_message(message: &str, hashmap: &mut HashMap<String, String>)
                 },
                 Some("SET") => {
                     if args.len() == 2 {
-                        hashmap.insert(args[0].clone(), args[1].clone());
+                        hashmap.insert(args[0].clone(), RedisValue::new(args[1].clone(), None));
                         "+OK\r\n".to_string()
+                    } else if args.len() == 4 {
+                        if args[2].to_uppercase() == "PX" {
+                            let ttl = args[3].parse::<u64>().unwrap();
+                            hashmap.insert(args[0].clone(), RedisValue::new(args[1].clone(), Some(ttl)));
+                            "+OK\r\n".to_string()
+                        } else {
+                            "-ERR syntax error\r\n".to_string()
+                        }
                     } else {
                         "-ERR wrong number of arguments for 'set' command\r\n".to_string()
                     }
@@ -42,8 +80,15 @@ pub fn parse_redis_message(message: &str, hashmap: &mut HashMap<String, String>)
                 Some("GET") => {
                     if args.len() == 1 {
                         match hashmap.get(&args[0]) {
-                            Some(value) => format!("${}\r\n{}\r\n", value.len(), value),
-                            None => "$-1\r\n".to_string()
+                            Some(redis_value) => {
+                                if redis_value.is_expired() {
+                                    hashmap.remove(&args[0]);
+                                    "$-1\r\n".to_string()
+                                } else {
+                                    format!("${}\r\n{}\r\n", redis_value.value.len(), redis_value.value)
+                                }
+                            }
+                            None => "$-1\r\n".to_string(),
                         }
                     } else {
                         "-ERR wrong number of arguments for 'get' command\r\n".to_string()
