@@ -104,15 +104,58 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
 
     // Helper to read a string-encoded value
     fn read_string(buffer: &[u8], cursor: &mut usize) -> io::Result<String> {
-        let size = decode_size(buffer, cursor)?;
-        println!("String size: {}", size);
-
-        let string_bytes = &buffer[*cursor..*cursor + size as usize];
-        *cursor += size as usize;
-        let result = String::from_utf8_lossy(string_bytes).into_owned();
-        println!("Read string: {}", result);
-        Ok(result)
+        let first_byte = read_u8(buffer, cursor)?;
+    
+        // Check if the size encoding indicates an integer or compressed data
+        if (first_byte & 0xC0) == 0xC0 {
+            match first_byte {
+                0xC0 => {
+                    // 8-bit integer
+                    let value = read_u8(buffer, cursor)?;
+                    println!("Read 8-bit integer: {}", value);
+                    return Ok(value.to_string());
+                }
+                0xC1 => {
+                    // 16-bit integer (little-endian)
+                    let value = read_uint_le(buffer, cursor, 2)?;
+                    println!("Read 16-bit integer: {}", value);
+                    return Ok(value.to_string());
+                }
+                0xC2 => {
+                    // 32-bit integer (little-endian)
+                    let value = read_uint_le(buffer, cursor, 4)?;
+                    println!("Read 32-bit integer: {}", value);
+                    return Ok(value.to_string());
+                }
+                0xC3 => {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "LZF compressed strings are not supported"));
+                }
+                _ => {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "Unknown string encoding type"));
+                }
+            }
+        } else {
+            // Handle regular size-encoded strings
+            let size = match first_byte >> 6 {
+                0b00 => u64::from(first_byte & 0x3F),
+                0b01 => {
+                    let second_byte = read_u8(buffer, cursor)?;
+                    u64::from(first_byte & 0x3F) << 8 | u64::from(second_byte)
+                }
+                0b10 => read_uint_le(buffer, cursor, 4)?,
+                _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "Unexpected string encoding type")),
+            };
+    
+            println!("String size: {}", size);
+    
+            let string_bytes = &buffer[*cursor..*cursor + size as usize];
+            *cursor += size as usize;
+            let result = String::from_utf8_lossy(string_bytes).into_owned();
+            println!("Read string: {}", result);
+            Ok(result)
+        }
     }
+    
 
     // Step 1: Read and validate the header
     let header = &buffer[0..9];
