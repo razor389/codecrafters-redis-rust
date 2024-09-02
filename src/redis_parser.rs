@@ -35,6 +35,16 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;
 
+    // Print buffer byte by byte in hexadecimal format
+    for (i, byte) in buffer.iter().enumerate() {
+        print!("{:02X} ", byte);
+        if (i + 1) % 16 == 0 {
+            println!(); // New line every 16 bytes for readability
+        }
+    }
+    println!(); // Ensure the last line ends properly
+
+
     let mut keys = Vec::new();
     let mut cursor = 0;
 
@@ -79,7 +89,6 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
 
     // Iterate over the data
     while let Ok(byte) = read_u8(&buffer, &mut cursor) {
-        println!("byte: {}", byte);
         match byte {
             0xFE => {
                 // Start of the database subsection, followed by the database index
