@@ -1,54 +1,43 @@
 pub fn parse_redis_message(message: &str) -> String {
     let mut lines = message.lines();
-    println!("Message received: {:?}", message);
-    for line in lines.clone() {
-        println!("Line: {:?}", line);
-    }
-    // Ensure we are dealing with a RESP array
+
     if let Some(line) = lines.next() {
-        if !line.starts_with('*') {
-            return "-ERR invalid format\r\n".to_string();
-        }
+        if line.starts_with('*') {
+            let mut command = None;
+            let mut args = Vec::new();
 
-        let mut command = None;
-        let mut args = Vec::new();
-
-        while let Some(line) = lines.next() {
-            if line.starts_with('$') {
-                // Length line; skip it and move to the actual data
-                if let Some(data_line) = lines.next() {
-                    if command.is_none() {
-                        // First bulk string is the command
-                        command = Some(data_line.to_uppercase());
-                    } else {
-                        // Subsequent bulk strings are arguments
-                        args.push(data_line.to_string());
+            while let Some(line) = lines.next() {
+                if line.starts_with('$') {
+                    // Skip the length line and go to the actual data
+                    if let Some(arg) = lines.next() {
+                        if command.is_none() {
+                            command = Some(arg.to_uppercase());  // Set the command
+                        } else {
+                            args.push(arg.to_string());  // Set the argument
+                        }
                     }
                 }
             }
-        }
 
-        // Debugging output to verify parsing
-        println!("Command parsed: {:?}", command);
-        println!("Arguments parsed: {:?}", args);
-
-        // Match on the parsed command
-        match command.as_deref() {
-            Some("PING") => "+PONG\r\n".to_string(),
-            Some("ECHO") => {
-                if let Some(echo_message) = args.get(0) {
-                    format!("{}\r\n", echo_message)  // Return the argument directly
-                } else {
-                    "-ERR missing argument\r\n".to_string()
+            match command.as_deref() {
+                Some("PING") => "+PONG\r\n".to_string(),
+                Some("ECHO") => {
+                    if let Some(echo_message) = args.get(0) {
+                        // Return the argument as a bulk string
+                        format!("${}\r\n{}\r\n", echo_message.len(), echo_message)
+                    } else {
+                        "-ERR missing argument\r\n".to_string()
+                    }
                 }
+                _ => "-ERR unknown command\r\n".to_string(),
             }
-            _ => "-ERR unknown command\r\n".to_string(),
+        } else {
+            "-ERR invalid format\r\n".to_string()
         }
     } else {
         "-ERR empty message\r\n".to_string()
     }
 }
-
 
 
 #[cfg(test)]
