@@ -5,33 +5,31 @@ use redis_parser::parse_redis_message;
 
 mod redis_parser;
 
-fn handle_client(stream: &mut TcpStream) -> io::Result<()> {
+pub fn handle_client(stream: &mut TcpStream) -> io::Result<()> {
     let mut buffer = [0; 512];
     let mut partial_message = String::new();
 
     loop {
+        // Read data from the stream into the buffer
         let bytes_read = stream.read(&mut buffer)?;
 
         if bytes_read == 0 {
             break; // Connection was closed
         }
 
-        let received_data = String::from_utf8_lossy(&buffer[..bytes_read]);
-        partial_message.push_str(&received_data);
+        // Append the received data to the partial message
+        partial_message.push_str(&String::from_utf8_lossy(&buffer[..bytes_read]));
 
-        if let Some(last_newline_idx) = partial_message.rfind('\n') {
-            let complete_messages = &partial_message[..last_newline_idx + 1];
-            let remaining_part = &partial_message[last_newline_idx + 1..];
+        // Log the partial message for debugging
+        println!("Partial message received: {:?}", partial_message);
 
-            for message in complete_messages.split('\n') {
-                if !message.trim().is_empty() {
-                    let response = parse_redis_message(message);
-                    stream.write_all(response.as_bytes())?;
-                    stream.flush()?;
-                }
-            }
-
-            partial_message = remaining_part.to_string();
+        // Check if the partial message contains a full RESP command
+        if partial_message.ends_with("\r\n") {
+            // Now parse the full message
+            let response = parse_redis_message(&partial_message);
+            stream.write_all(response.as_bytes())?;
+            stream.flush()?;
+            partial_message.clear(); // Clear the message buffer after processing
         }
     }
 
