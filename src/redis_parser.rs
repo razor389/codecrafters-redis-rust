@@ -35,6 +35,8 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;
 
+    println!("RDB file read successfully. Size: {} bytes", buffer.len());
+    
     let mut keys = Vec::new();
     let mut cursor = 0;
 
@@ -66,14 +68,25 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
     // Helper to decode the size-encoded values
     fn decode_size(buffer: &[u8], cursor: &mut usize) -> io::Result<u64> {
         let first_byte = read_u8(buffer, cursor)?;
+        println!("Decoding size: first byte = {:02X}", first_byte);
 
         let size = match first_byte >> 6 {
-            0b00 => u64::from(first_byte & 0x3F),
+            0b00 => {
+                let size = u64::from(first_byte & 0x3F);
+                println!("Size encoded with 6 bits: {}", size);
+                size
+            }
             0b01 => {
                 let second_byte = read_u8(buffer, cursor)?;
-                u64::from(first_byte & 0x3F) << 8 | u64::from(second_byte)
+                let size = u64::from(first_byte & 0x3F) << 8 | u64::from(second_byte);
+                println!("Size encoded with 14 bits: {}", size);
+                size
             }
-            0b10 => read_uint_le(buffer, cursor, 4)?,
+            0b10 => {
+                let size = read_uint_le(buffer, cursor, 4)?;
+                println!("Size encoded with 32 bits: {}", size);
+                size
+            }
             0b11 => return Err(io::Error::new(io::ErrorKind::InvalidData, "Unexpected string encoding type")),
             _ => unreachable!(),
         };
@@ -83,36 +96,46 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
     // Helper to read a string-encoded value
     fn read_string(buffer: &[u8], cursor: &mut usize) -> io::Result<String> {
         let size = decode_size(buffer, cursor)?;
+        println!("String size: {}", size);
 
         let string_bytes = &buffer[*cursor..*cursor + size as usize];
         *cursor += size as usize;
-        Ok(String::from_utf8_lossy(string_bytes).into_owned())
+        let result = String::from_utf8_lossy(string_bytes).into_owned();
+        println!("Read string: {}", result);
+        Ok(result)
     }
 
     // Iterate over the data
     while let Ok(byte) = read_u8(&buffer, &mut cursor) {
+        println!("Processing byte: {:02X} at cursor {}", byte, cursor - 1);
         match byte {
             0xFD => {
                 // Expiration timestamp in seconds
-                let _expire_timestamp = read_uint_le(&buffer, &mut cursor, 4)?;
+                let expire_timestamp = read_uint_le(&buffer, &mut cursor, 4)?;
+                println!("Expiration timestamp (seconds): {}", expire_timestamp);
             }
             0xFC => {
                 // Expiration timestamp in milliseconds
-                let _expire_timestamp = read_uint_le(&buffer, &mut cursor, 8)?;
+                let expire_timestamp = read_uint_le(&buffer, &mut cursor, 8)?;
+                println!("Expiration timestamp (milliseconds): {}", expire_timestamp);
             }
             0x00 | 0x01 | 0x02 | 0x03 => {
                 // Value type (0 = string, other values may represent other types)
+                println!("Value type: {:02X}", byte);
                 let key = read_string(&buffer, &mut cursor)?;
-                let _value = read_string(&buffer, &mut cursor)?;
+                let value = read_string(&buffer, &mut cursor)?;
+                println!("Parsed key-value pair: {} -> {}", key, value);
                 keys.push(key);
             }
             0xFF => {
                 // End of file section
+                println!("End of file detected.");
                 // Read and skip the 8-byte checksum
                 cursor += 8;
                 break;
             }
             _ => {
+                println!("Unknown byte detected: {:02X}", byte);
                 return Err(io::Error::new(io::ErrorKind::InvalidData, "Unknown byte in RDB file"));
             }
         }
@@ -120,6 +143,7 @@ fn parse_rdb_file(file_path: &str) -> io::Result<Vec<String>> {
 
     Ok(keys)
 }
+
 
 pub fn parse_redis_message(
     message: &str,
