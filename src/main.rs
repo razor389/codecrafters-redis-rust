@@ -38,14 +38,9 @@ fn handle_client(stream: &mut TcpStream) -> io::Result<()> {
     Ok(())
 }
 
-fn main() {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    println!("Logs from your program will appear here!");
+pub fn start_server() -> io::Result<()> {
+    let listener = TcpListener::bind("127.0.0.1:6379")?;
 
-    // Uncomment this block to pass the first stage
-    //
-    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
-    
     for mut stream in listener.incoming() {
         thread::spawn(move || {
             match stream {
@@ -59,4 +54,10 @@ fn main() {
             }
         });
     }
+    Ok(())
+}
+
+fn main() {
+    println!("Logs from your program will appear here!");
+    start_server().unwrap();
 }
