@@ -101,6 +101,7 @@ pub fn parse_redis_message(
                 },
                 Some("CONFIG") => {
                     if args.len() == 2 && args[0].to_uppercase() == "GET" {
+                        println!("Config Map: {:?}", config_map);
                         if let Some(value) = config_map.get(&args[1]) {
                             format!("*2\r\n${}\r\n{}\r\n${}\r\n{}\r\n", args[1].len(), args[1], value.len(), value)
                         } else {
