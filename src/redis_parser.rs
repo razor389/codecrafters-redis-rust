@@ -23,6 +23,10 @@ pub fn parse_redis_message(message: &str) -> String {
                 }
             }
 
+            // Debugging output
+            println!("Command parsed: {:?}", command);
+            println!("Arguments parsed: {:?}", args);
+
             match command.as_deref() {
                 Some("PING") => "+PONG\r\n".to_string(),
                 Some("ECHO") => {
