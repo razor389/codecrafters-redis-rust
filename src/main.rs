@@ -50,7 +50,7 @@ fn initialize_database(config_map: &HashMap<String, String>) -> RedisDatabase {
             }
         }
     }
-
+    println!("Database data: {:?}", db.data);
     db
 }
 
