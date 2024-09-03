@@ -56,3 +56,13 @@ pub fn handle_echo(args: &[String]) -> String {
         "-ERR wrong number of arguments for 'echo' command\r\n".to_string()
     }
 }
+
+pub fn handle_ping(args: &[String]) -> String {
+    if args.is_empty() {
+        "+PONG\r\n".to_string()
+    } else if args.len() == 1 {
+        format!("${}\r\n{}\r\n", args[0].len(), args[0])
+    } else {
+        "-ERR wrong number of arguments for 'ping' command\r\n".to_string()
+    }
+}
