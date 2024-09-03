@@ -26,6 +26,7 @@ pub fn handle_client(stream: &mut TcpStream, db: &mut RedisDatabase, config_map:
         partial_message.push_str(&String::from_utf8_lossy(&buffer[..bytes_read]));
 
         if partial_message.ends_with("\r\n") {
+            println!("Received message: {}", partial_message);
             let response = parse_redis_message(&partial_message, db, config_map);
             stream.write_all(response.as_bytes())?;
             stream.flush()?;
