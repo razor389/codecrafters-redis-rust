@@ -56,8 +56,8 @@ fn initialize_database(config_map: &HashMap<String, String>) -> RedisDatabase {
 
 
 pub fn start_server(config_map: HashMap<String, String>) -> io::Result<()> {
-    // If the config map has a key "port", use that value, otherwise use the default port 6379
-    let port = config_map.get("port").unwrap_or(&"6379".to_string());
+    let default_port = "6379".to_string(); // Bind the default value to a variable
+    let port = config_map.get("port").unwrap_or(&default_port); // Borrow either the value from the map or the default value
     let address = format!("127.0.0.1:{}", port);
 
     // Start the TCP listener on the chosen address
