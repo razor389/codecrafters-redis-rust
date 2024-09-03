@@ -111,15 +111,25 @@ pub fn parse_rdb_file(file_path: &str, db: &mut RedisDatabase) -> io::Result<()>
         match byte {
             0xFD => { // Expiration timestamp in seconds
                 let expire_seconds = read_uint_le(&buffer, &mut cursor, 4)?;
-                let now = SystemTime::now();
-                let ttl = Duration::from_secs(expire_seconds) - now.duration_since(SystemTime::UNIX_EPOCH).unwrap_or(Duration::ZERO);
-                current_ttl = Some(ttl);
+                let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or(Duration::ZERO).as_secs();
+                if expire_seconds > now {
+                    let ttl = Duration::from_secs(expire_seconds - now);
+                    current_ttl = Some(ttl);
+                } else {
+                    // Expiration time is in the past
+                    current_ttl = Some(Duration::ZERO);  // Already expired
+                }
             },
             0xFC => { // Expiration timestamp in milliseconds
                 let expire_milliseconds = read_uint_le(&buffer, &mut cursor, 8)?;
-                let now = SystemTime::now();
-                let ttl = Duration::from_millis(expire_milliseconds) - now.duration_since(SystemTime::UNIX_EPOCH).unwrap_or(Duration::ZERO);
-                current_ttl = Some(ttl);
+                let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or(Duration::ZERO).as_millis() as u64;
+                if expire_milliseconds > now {
+                    let ttl = Duration::from_millis(expire_milliseconds - now as u64);
+                    current_ttl = Some(ttl);
+                } else {
+                    // Expiration time is in the past
+                    current_ttl = Some(Duration::ZERO);  // Already expired
+                }
             },
             0xFE => { decode_size(&buffer, &mut cursor)?; },     // Start of database subsection
             0xFB => {
@@ -129,7 +139,7 @@ pub fn parse_rdb_file(file_path: &str, db: &mut RedisDatabase) -> io::Result<()>
             0x00 | 0x01 | 0x02 | 0x03 => {
                 let key = read_string(&buffer, &mut cursor)?;
                 let value = read_string(&buffer, &mut cursor)?;
-                db.insert(key, RedisValue::new(value, current_ttl.map(|ttl| ttl.as_millis() as u64))); // Insert with TTL if applicable
+                db.insert(key, RedisValue::new(value, current_ttl.map(|ttl| ttl.as_secs()))); // Insert with TTL if applicable
                 current_ttl = None; // Reset TTL after insertion
             },
             0xFF => { break; }, // End of file section
@@ -138,6 +148,6 @@ pub fn parse_rdb_file(file_path: &str, db: &mut RedisDatabase) -> io::Result<()>
             }
         }
     }
-
+    
     Ok(())
 }
