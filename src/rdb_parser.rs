@@ -126,29 +126,18 @@ pub fn parse_rdb_file(file_path: &str, db: &mut RedisDatabase) -> io::Result<()>
                 let now_seconds = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or(Duration::ZERO).as_secs();
                 println!("Debug: Current time in seconds: {}", now_seconds);
                 println!("Debug: Expiration time in seconds: {}", expire_seconds);
-                if expire_seconds > now_seconds {
-                    let ttl_millis = (expire_seconds - now_seconds) * 1000; // Convert to milliseconds
-                    println!("Debug: Calculated TTL in milliseconds: {}", ttl_millis);
-                    current_ttl = Some(ttl_millis); // Store as u64
-                } else {
-                    println!("Debug: Key has already expired (seconds).");
-                    current_ttl = None;  // Already expired, set to None
-                }
+                let ttl_millis = (expire_seconds - now_seconds) * 1000; // Convert to milliseconds
+                println!("Debug: Calculated TTL in milliseconds: {}", ttl_millis);
+                current_ttl = Some(ttl_millis); // Store as u64
             },
             0xFC => { // Expiration timestamp in milliseconds
                 println!("Debug: Found key with expiration timestamp in milliseconds.");
                 let expire_milliseconds = read_uint_le(&buffer, &mut cursor, 8)?;
                 let now_millis = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or(Duration::ZERO).as_millis() as u64;
                 println!("Debug: Current time in milliseconds: {}", now_millis);
-                println!("Debug: Expiration time in milliseconds: {}", expire_milliseconds);
-                if expire_milliseconds > now_millis {
-                    let ttl_millis = expire_milliseconds - now_millis;
-                    println!("Debug: Calculated TTL in milliseconds: {}", ttl_millis);
-                    current_ttl = Some(ttl_millis); // Store as u64
-                } else {
-                    println!("Debug: Key has already expired (milliseconds).");
-                    current_ttl = None;  // Already expired, set to None
-                }
+                let ttl_millis = expire_milliseconds - now_millis;
+                println!("Debug: Calculated TTL in milliseconds: {}", ttl_millis);
+                current_ttl = Some(ttl_millis); // Store as u64
             },
             0xFE => { decode_size(&buffer, &mut cursor)?; }, // Start of database subsection
             0xFB => {
@@ -168,6 +157,7 @@ pub fn parse_rdb_file(file_path: &str, db: &mut RedisDatabase) -> io::Result<()>
             }
         }
     }
+    
        
     
     Ok(())

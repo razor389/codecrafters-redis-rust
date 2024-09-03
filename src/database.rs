@@ -46,22 +46,23 @@ impl RedisValue {
     pub fn is_expired(&self) -> bool {
         if let Some(ttl) = self.ttl {
             let elapsed = self.creation_time.elapsed();
-
+    
             println!("Debug: now = {:?}", Instant::now());
             println!("Debug: creation_time = {:?}", self.creation_time);
             println!("Debug: elapsed = {:?}", elapsed);
             println!("Debug: ttl = {:?}", ttl);
-
-            let is_expired = elapsed > ttl;
-
+    
+            // Treat a TTL of 0 or less as expired
+            let is_expired = elapsed >= ttl || ttl.as_secs() == 0 && ttl.subsec_millis() == 0;
+    
             println!("Debug: is_expired = {}", is_expired);
-
+    
             is_expired
         } else {
             false
         }
     }
-
+    
     pub fn get_value(&self) -> &str {
         &self.value
     }
