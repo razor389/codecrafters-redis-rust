@@ -84,6 +84,17 @@ pub fn parse_rdb_file(file_path: &str, db: &mut RedisDatabase) -> io::Result<()>
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;
 
+    println!("File content in bytes:");
+    for (i, byte) in buffer.iter().enumerate() {
+        // Print the byte as a hexadecimal value along with its index
+        print!("{:02X} ", byte);
+        if (i + 1) % 16 == 0 {
+            println!(); // New line every 16 bytes for readability
+        }
+    }
+    println!(); // Final newline after the last line
+
+
     let mut cursor = 0;
     let mut current_ttl: Option<u64> = None;
 
