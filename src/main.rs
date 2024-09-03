@@ -57,21 +57,19 @@ pub fn start_server(config_map: HashMap<String, String>) -> io::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:6379")?;
     let db = Arc::new(Mutex::new(initialize_database(&config_map)));
 
-    for mut stream in listener.incoming() {
-        let config_map = config_map.clone();
-        let db = Arc::clone(&db);
-        thread::spawn(move || {
-            match stream {
-                Ok(ref mut stream) => {
-                    println!("accepted new connection");
-                    let mut db = db.lock().unwrap();
-                    let _ = handle_client(stream, &mut db, &config_map);
-                }
-                Err(e) => {
-                    println!("error: {}", e);
-                }
+    for stream in listener.incoming() {
+        match stream {
+            Ok(mut stream) => {
+                let db = Arc::clone(&db);
+                let config_map = config_map.clone();
+                thread::spawn(move || {
+                    let _ = handle_client(&mut stream, &mut db.lock().unwrap(), &config_map);
+                });
             }
-        });
+            Err(e) => {
+                println!("Connection failed: {}", e);
+            }
+        }
     }
     Ok(())
 }
