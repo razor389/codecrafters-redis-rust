@@ -45,10 +45,14 @@ impl RedisValue {
 
     pub fn is_expired(&self) -> bool {
         if let Some(ttl) = self.ttl {
-            self.creation_time.elapsed().unwrap_or(Duration::from_secs(0)) > ttl
-        } else {
-            false
+            if let Ok(elapsed) = self.creation_time.elapsed() {
+                return elapsed > ttl;
+            } else {
+                // If `elapsed` fails, assume the key is expired to prevent stale keys
+                return true;
+            }
         }
+        false
     }
 
     pub fn get_value(&self) -> &str {
