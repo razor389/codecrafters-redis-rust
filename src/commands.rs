@@ -4,11 +4,11 @@ use std::collections::HashMap;
 
 pub fn handle_set(db: &mut RedisDatabase, args: &[String]) -> String {
     if args.len() == 2 {
-        db.insert(args[0].clone(), RedisValue::new(args[1].clone(), None));
+        db.insert(args[0].clone(), RedisValue::new(args[1].clone(), None, false));
         "+OK\r\n".to_string()
     } else if args.len() == 4 && args[2].to_uppercase() == "PX" {
         let ttl = args[3].parse::<u64>().unwrap();
-        db.insert(args[0].clone(), RedisValue::new(args[1].clone(), Some(ttl)));
+        db.insert(args[0].clone(), RedisValue::new(args[1].clone(), Some(ttl), true));
         "+OK\r\n".to_string()
     } else {
         "-ERR wrong number of arguments for 'set' command\r\n".to_string()

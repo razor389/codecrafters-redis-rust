@@ -117,21 +117,21 @@ pub fn parse_rdb_file(file_path: &str, db: &mut RedisDatabase) -> io::Result<()>
                     current_ttl = Some(ttl);
                 } else {
                     // Expiration time is in the past
-                    current_ttl = Some(Duration::ZERO);  // Already expired
+                    current_ttl = None;  // Already expired, set to None
                 }
             },
             0xFC => { // Expiration timestamp in milliseconds
                 let expire_milliseconds = read_uint_le(&buffer, &mut cursor, 8)?;
                 let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or(Duration::ZERO).as_millis() as u64;
                 if expire_milliseconds > now {
-                    let ttl = Duration::from_millis(expire_milliseconds - now as u64);
+                    let ttl = Duration::from_millis(expire_milliseconds - now);
                     current_ttl = Some(ttl);
                 } else {
                     // Expiration time is in the past
-                    current_ttl = Some(Duration::ZERO);  // Already expired
+                    current_ttl = None;  // Already expired, set to None
                 }
             },
-            0xFE => { decode_size(&buffer, &mut cursor)?; },     // Start of database subsection
+            0xFE => { decode_size(&buffer, &mut cursor)?; }, // Start of database subsection
             0xFB => {
                 decode_size(&buffer, &mut cursor)?; // Key hash table size
                 decode_size(&buffer, &mut cursor)?; // Expire hash table size
@@ -139,7 +139,8 @@ pub fn parse_rdb_file(file_path: &str, db: &mut RedisDatabase) -> io::Result<()>
             0x00 | 0x01 | 0x02 | 0x03 => {
                 let key = read_string(&buffer, &mut cursor)?;
                 let value = read_string(&buffer, &mut cursor)?;
-                db.insert(key, RedisValue::new(value, current_ttl.map(|ttl| ttl.as_secs()))); // Insert with TTL if applicable
+                let is_milliseconds = current_ttl.is_some() && byte == 0xFC;
+                db.insert(key, RedisValue::new(value, current_ttl.map(|ttl| if is_milliseconds { ttl.as_millis() as u64 } else { ttl.as_secs() }), is_milliseconds)); // Insert with TTL if applicable
                 current_ttl = None; // Reset TTL after insertion
             },
             0xFF => { break; }, // End of file section
@@ -148,6 +149,7 @@ pub fn parse_rdb_file(file_path: &str, db: &mut RedisDatabase) -> io::Result<()>
             }
         }
     }
+    
     
     Ok(())
 }
