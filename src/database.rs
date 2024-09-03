@@ -1,6 +1,6 @@
 // src/database.rs
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant};
 
 pub struct RedisDatabase {
     pub data: HashMap<String, RedisValue>,
@@ -29,30 +29,26 @@ impl RedisDatabase {
 #[derive(Debug)]
 pub struct RedisValue {
     value: String,
-    creation_time: SystemTime,
+    creation_time: Instant,
     ttl: Option<Duration>,
 }
 
 impl RedisValue {
     pub fn new(value: String, ttl: Option<u64>) -> Self {
-        let ttl_duration = ttl.map(Duration::from_millis);
+        let ttl_duration = ttl.map(Duration::from_secs);  // Assuming TTL is in seconds
         RedisValue {
             value,
-            creation_time: SystemTime::now(),
+            creation_time: Instant::now(),
             ttl: ttl_duration,
         }
     }
 
     pub fn is_expired(&self) -> bool {
         if let Some(ttl) = self.ttl {
-            if let Ok(elapsed) = self.creation_time.elapsed() {
-                return elapsed > ttl;
-            } else {
-                // If `elapsed` fails, assume the key is expired to prevent stale keys
-                return true;
-            }
+            self.creation_time.elapsed() > ttl
+        } else {
+            false
         }
-        false
     }
 
     pub fn get_value(&self) -> &str {
