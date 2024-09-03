@@ -12,7 +12,7 @@ mod commands;
 mod parsing;
 mod rdb_parser;
 
-pub fn handle_client(stream: &mut TcpStream, db: &mut RedisDatabase, config_map: &HashMap<String, String>) -> io::Result<()> {
+pub fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_map: &HashMap<String, String>) -> io::Result<()> {
     let mut buffer = [0; 512];
     let mut partial_message = String::new();
 
@@ -27,7 +27,8 @@ pub fn handle_client(stream: &mut TcpStream, db: &mut RedisDatabase, config_map:
 
         if partial_message.ends_with("\r\n") {
             println!("Received message: {}", partial_message);
-            let response = parse_redis_message(&partial_message, db, config_map);
+            let mut db_lock = db.lock().unwrap();  // Locking the database only when needed
+            let response = parse_redis_message(&partial_message, &mut db_lock, config_map);
             stream.write_all(response.as_bytes())?;
             stream.flush()?;
             partial_message.clear();
@@ -36,6 +37,7 @@ pub fn handle_client(stream: &mut TcpStream, db: &mut RedisDatabase, config_map:
 
     Ok(())
 }
+
 
 fn initialize_database(config_map: &HashMap<String, String>) -> RedisDatabase {
     let mut db = RedisDatabase::new();
@@ -63,7 +65,7 @@ pub fn start_server(config_map: HashMap<String, String>) -> io::Result<()> {
                 let db = Arc::clone(&db);
                 let config_map = config_map.clone();
                 thread::spawn(move || {
-                    let _ = handle_client(&mut stream, &mut db.lock().unwrap(), &config_map);
+                    let _ = handle_client(&mut stream, db, &config_map);
                 });
             }
             Err(e) => {
@@ -73,6 +75,7 @@ pub fn start_server(config_map: HashMap<String, String>) -> io::Result<()> {
     }
     Ok(())
 }
+
 
 fn main() {
     let args: Vec<String> = env::args().collect();
