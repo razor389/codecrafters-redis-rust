@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use crate::parsing::parse_redis_message;
 use crate::database::RedisDatabase;
 use crate::rdb_parser::parse_rdb_file;
+use std::path::Path;
 
 mod database;
 mod commands;
@@ -37,13 +38,19 @@ pub fn handle_client(stream: &mut TcpStream, db: &mut RedisDatabase, config_map:
 
 fn initialize_database(config_map: &HashMap<String, String>) -> RedisDatabase {
     let mut db = RedisDatabase::new();
-    if let Some(rdb_path) = config_map.get("dbfilename") {
-        if let Err(e) = parse_rdb_file(rdb_path, &mut db) {
-            println!("Failed to parse RDB file: {}. Starting with an empty database.", e);
+
+    if let Some(dir) = config_map.get("dir") {
+        if let Some(dbfilename) = config_map.get("dbfilename") {
+            let rdb_path = Path::new(dir).join(dbfilename);
+            if let Err(e) = parse_rdb_file(rdb_path.to_str().unwrap(), &mut db) {
+                println!("Failed to parse RDB file: {}. Starting with an empty database.", e);
+            }
         }
     }
+
     db
 }
+
 
 pub fn start_server(config_map: HashMap<String, String>) -> io::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:6379")?;
