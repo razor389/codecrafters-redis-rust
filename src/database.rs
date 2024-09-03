@@ -35,7 +35,7 @@ pub struct RedisValue {
 
 impl RedisValue {
     pub fn new(value: String, ttl: Option<u64>) -> Self {
-        let ttl_duration = ttl.map(Duration::from_secs);  // Assuming TTL is in seconds
+        let ttl_duration = ttl.map(Duration::from_secs); // Assuming TTL is in seconds
         RedisValue {
             value,
             creation_time: Instant::now(),
@@ -45,7 +45,19 @@ impl RedisValue {
 
     pub fn is_expired(&self) -> bool {
         if let Some(ttl) = self.ttl {
-            self.creation_time.elapsed() > ttl
+            let now = Instant::now();
+            let elapsed = self.creation_time.elapsed();
+
+            println!("Debug: now = {:?}", now);
+            println!("Debug: creation_time = {:?}", self.creation_time);
+            println!("Debug: elapsed = {:?}", elapsed);
+            println!("Debug: ttl = {:?}", ttl);
+
+            let is_expired = elapsed > ttl;
+
+            println!("Debug: is_expired = {}", is_expired);
+
+            is_expired
         } else {
             false
         }
