@@ -27,42 +27,49 @@ impl RedisDatabase {
 }
 
 #[derive(Debug)]
+enum TtlState {
+    Waiting(Duration), // TTL is active, and the key is waiting to expire
+    Expired,           // TTL has expired
+}
+
+#[derive(Debug)]
 pub struct RedisValue {
     value: String,
     creation_time: Instant,
-    ttl: Option<Duration>,  // Store TTL as Duration internally
+    ttl_state: Option<TtlState>,  // TTL state, either None, Waiting, or Expired
 }
 
 impl RedisValue {
-    pub fn new(value: String, ttl: Option<u64>) -> Self {
-        let ttl_duration = ttl.map(Duration::from_millis);  // Convert u64 to Duration
+    pub fn new(value: String, ttl_millis: Option<u64>) -> Self {
+        let ttl_state = ttl_millis.map(|ttl| {
+            if ttl == 0 {
+                TtlState::Expired
+            } else {
+                TtlState::Waiting(Duration::from_millis(ttl))
+            }
+        });
+
         RedisValue {
             value,
             creation_time: Instant::now(),
-            ttl: ttl_duration,
+            ttl_state,
         }
     }
 
     pub fn is_expired(&self) -> bool {
-        if let Some(ttl) = self.ttl {
-            let elapsed = self.creation_time.elapsed();
-    
-            println!("Debug: now = {:?}", Instant::now());
-            println!("Debug: creation_time = {:?}", self.creation_time);
-            println!("Debug: elapsed = {:?}", elapsed);
-            println!("Debug: ttl = {:?}", ttl);
-    
-            // Treat a TTL of 0 or less as expired
-            let is_expired = elapsed >= ttl || ttl.as_secs() == 0 && ttl.subsec_millis() == 0;
-    
-            println!("Debug: is_expired = {}", is_expired);
-    
-            is_expired
-        } else {
-            false
+        match self.ttl_state {
+            Some(TtlState::Waiting(ttl)) => {
+                let elapsed = self.creation_time.elapsed();
+                println!("Debug: elapsed = {:?}", elapsed);
+                println!("Debug: ttl = {:?}", ttl);
+
+                elapsed >= ttl
+            }
+            Some(TtlState::Expired) => true,
+            None => false,
         }
     }
-    
+
     pub fn get_value(&self) -> &str {
         &self.value
     }
