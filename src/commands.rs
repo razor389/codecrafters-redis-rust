@@ -48,3 +48,11 @@ pub fn handle_config(config_map: &HashMap<String, String>, args: &[String]) -> S
         "-ERR syntax error\r\n".to_string()
     }
 }
+
+pub fn handle_echo(args: &[String]) -> String {
+    if args.len() == 1 {
+        format!("${}\r\n{}\r\n", args[0].len(), args[0])
+    } else {
+        "-ERR wrong number of arguments for 'echo' command\r\n".to_string()
+    }
+}
