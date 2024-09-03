@@ -30,12 +30,12 @@ impl RedisDatabase {
 pub struct RedisValue {
     value: String,
     creation_time: Instant,
-    ttl: Option<Duration>,
+    ttl: Option<Duration>,  // Store TTL as Duration internally
 }
 
 impl RedisValue {
     pub fn new(value: String, ttl: Option<u64>) -> Self {
-        let ttl_duration = ttl.map(Duration::from_millis); // Always use milliseconds
+        let ttl_duration = ttl.map(Duration::from_millis);  // Convert u64 to Duration
         RedisValue {
             value,
             creation_time: Instant::now(),
