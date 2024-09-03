@@ -110,6 +110,7 @@ pub fn parse_rdb_file(file_path: &str, db: &mut RedisDatabase) -> io::Result<()>
     while let Ok(byte) = read_u8(&buffer, &mut cursor) {
         match byte {
             0xFD => { // Expiration timestamp in seconds
+                println!("Debug: Found key with expiration timestamp in seconds.");
                 let expire_seconds = read_uint_le(&buffer, &mut cursor, 4)?;
                 let now_seconds = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or(Duration::ZERO).as_secs();
                 if expire_seconds > now_seconds {
@@ -122,6 +123,7 @@ pub fn parse_rdb_file(file_path: &str, db: &mut RedisDatabase) -> io::Result<()>
                 }
             },
             0xFC => { // Expiration timestamp in milliseconds
+                println!("Debug: Found key with expiration timestamp in milliseconds.");
                 let expire_milliseconds = read_uint_le(&buffer, &mut cursor, 8)?;
                 let now_millis = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or(Duration::ZERO).as_millis() as u64;
                 if expire_milliseconds > now_millis {
