@@ -34,12 +34,8 @@ pub struct RedisValue {
 }
 
 impl RedisValue {
-    pub fn new(value: String, ttl: Option<u64>, is_milliseconds: bool) -> Self {
-        let ttl_duration = if is_milliseconds {
-            ttl.map(Duration::from_millis)
-        } else {
-            ttl.map(Duration::from_secs)
-        };
+    pub fn new(value: String, ttl: Option<u64>) -> Self {
+        let ttl_duration = ttl.map(Duration::from_millis); // Always use milliseconds
         RedisValue {
             value,
             creation_time: Instant::now(),

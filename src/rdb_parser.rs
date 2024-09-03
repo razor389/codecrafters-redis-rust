@@ -111,10 +111,10 @@ pub fn parse_rdb_file(file_path: &str, db: &mut RedisDatabase) -> io::Result<()>
         match byte {
             0xFD => { // Expiration timestamp in seconds
                 let expire_seconds = read_uint_le(&buffer, &mut cursor, 4)?;
-                let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or(Duration::ZERO).as_secs();
-                if expire_seconds > now {
-                    let ttl = Duration::from_secs(expire_seconds - now);
-                    current_ttl = Some(ttl);
+                let now_seconds = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or(Duration::ZERO).as_secs();
+                if expire_seconds > now_seconds {
+                    let ttl_millis = (expire_seconds - now_seconds) * 1000; // Convert TTL to milliseconds
+                    current_ttl = Some(Duration::from_millis(ttl_millis));
                 } else {
                     // Expiration time is in the past
                     current_ttl = None;  // Already expired, set to None
@@ -122,10 +122,10 @@ pub fn parse_rdb_file(file_path: &str, db: &mut RedisDatabase) -> io::Result<()>
             },
             0xFC => { // Expiration timestamp in milliseconds
                 let expire_milliseconds = read_uint_le(&buffer, &mut cursor, 8)?;
-                let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or(Duration::ZERO).as_millis() as u64;
-                if expire_milliseconds > now {
-                    let ttl = Duration::from_millis(expire_milliseconds - now);
-                    current_ttl = Some(ttl);
+                let now_millis = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or(Duration::ZERO).as_millis() as u64;
+                if expire_milliseconds > now_millis {
+                    let ttl_millis = expire_milliseconds - now_millis; // TTL is already in milliseconds
+                    current_ttl = Some(Duration::from_millis(ttl_millis));
                 } else {
                     // Expiration time is in the past
                     current_ttl = None;  // Already expired, set to None
@@ -139,8 +139,7 @@ pub fn parse_rdb_file(file_path: &str, db: &mut RedisDatabase) -> io::Result<()>
             0x00 | 0x01 | 0x02 | 0x03 => {
                 let key = read_string(&buffer, &mut cursor)?;
                 let value = read_string(&buffer, &mut cursor)?;
-                let is_milliseconds = current_ttl.is_some() && byte == 0xFC;
-                db.insert(key, RedisValue::new(value, current_ttl.map(|ttl| if is_milliseconds { ttl.as_millis() as u64 } else { ttl.as_secs() }), is_milliseconds)); // Insert with TTL if applicable
+                db.insert(key, RedisValue::new(value, current_ttl.map(|ttl| ttl.as_millis() as u64))); // Insert with TTL in milliseconds
                 current_ttl = None; // Reset TTL after insertion
             },
             0xFF => { break; }, // End of file section
@@ -149,6 +148,7 @@ pub fn parse_rdb_file(file_path: &str, db: &mut RedisDatabase) -> io::Result<()>
             }
         }
     }
+    
     
     
     Ok(())
