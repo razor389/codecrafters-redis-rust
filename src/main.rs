@@ -56,7 +56,14 @@ fn initialize_database(config_map: &HashMap<String, String>) -> RedisDatabase {
 
 
 pub fn start_server(config_map: HashMap<String, String>) -> io::Result<()> {
-    let listener = TcpListener::bind("127.0.0.1:6379")?;
+    // If the config map has a key "port", use that value, otherwise use the default port 6379
+    let port = config_map.get("port").unwrap_or(&"6379".to_string());
+    let address = format!("127.0.0.1:{}", port);
+
+    // Start the TCP listener on the chosen address
+    let listener = TcpListener::bind(&address)?;
+
+    println!("Server listening on {}", address);
     let db = Arc::new(Mutex::new(initialize_database(&config_map)));
 
     for stream in listener.incoming() {
