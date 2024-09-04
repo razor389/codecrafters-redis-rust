@@ -71,7 +71,7 @@ pub fn handle_info(db: &RedisDatabase, args: &[String]) -> String {
     if args.len() == 1 && args[0].to_uppercase() == "REPLICATION" {
         let mut response = String::new();
         for (key, value) in &db.replication_info {
-            response.push_str(&format!("{}: {}\r\n", key, value));
+            response.push_str(&format!("{}:{}\r\n", key, value));
         }
         format!("${}\r\n{}\r\n", response.len(), response)
     } else {
