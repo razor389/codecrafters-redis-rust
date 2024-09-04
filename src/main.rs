@@ -48,6 +48,8 @@ fn initialize_database(config_map: &HashMap<String, String>) -> RedisDatabase {
     // Check if "replicaof" exists in the config_map
     if config_map.contains_key("replicaof") {
         replication_info.insert("role".to_string(), "slave".to_string());
+        replication_info.insert("master_replid".to_string(),"8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string());
+        replication_info.insert("master_repl_offset".to_string(), "0".to_string());
     } else {
         replication_info.insert("role".to_string(), "master".to_string());
     }
