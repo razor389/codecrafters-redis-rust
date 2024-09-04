@@ -101,7 +101,7 @@ pub fn parse_rdb_file(file_path: &str, db: &mut RedisDatabase) -> io::Result<()>
     // Validate header
     let header = &buffer[0..9];
     let header_str = String::from_utf8_lossy(header);
-    if &header_str != "REDIS0003" {
+    if (&header_str != "REDIS0003" || &header_str != "REDIS0007") {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid RDB file header"));
     }
     cursor += 9;
