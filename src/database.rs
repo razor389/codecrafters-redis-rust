@@ -4,12 +4,14 @@ use std::time::{Duration, Instant};
 
 pub struct RedisDatabase {
     pub data: HashMap<String, RedisValue>,
+    pub replication_info: HashMap<String, String>,
 }
 
 impl RedisDatabase {
     pub fn new() -> Self {
-        RedisDatabase {
+        Self {
             data: HashMap::new(),
+            replication_info: HashMap::new(), // Initialize the replication info
         }
     }
 

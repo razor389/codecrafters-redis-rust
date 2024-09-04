@@ -66,3 +66,15 @@ pub fn handle_ping(args: &[String]) -> String {
         "-ERR wrong number of arguments for 'ping' command\r\n".to_string()
     }
 }
+
+pub fn handle_info(db: &RedisDatabase, args: &[String]) -> String {
+    if args.len() == 1 && args[0].to_uppercase() == "REPLICATION" {
+        let mut response = String::new();
+        for (key, value) in &db.replication_info {
+            response.push_str(&format!("{}: {}\r\n", key, value));
+        }
+        format!("${}\r\n{}\r\n", response.len(), response)
+    } else {
+        "-ERR unknown section for INFO\r\n".to_string()
+    }
+}

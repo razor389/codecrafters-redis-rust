@@ -42,6 +42,13 @@ pub fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, conf
 fn initialize_database(config_map: &HashMap<String, String>) -> RedisDatabase {
     let mut db = RedisDatabase::new();
 
+    // Example replication info
+    let mut replication_info = HashMap::new();
+    replication_info.insert("role".to_string(), "master".to_string());
+    replication_info.insert("connected_slaves".to_string(), "0".to_string());
+    
+    db.replication_info = replication_info;
+
     if let Some(dir) = config_map.get("dir") {
         if let Some(dbfilename) = config_map.get("dbfilename") {
             let rdb_path = Path::new(dir).join(dbfilename);
