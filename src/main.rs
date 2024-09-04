@@ -44,11 +44,17 @@ fn initialize_database(config_map: &HashMap<String, String>) -> RedisDatabase {
 
     // Example replication info
     let mut replication_info = HashMap::new();
-    replication_info.insert("role".to_string(), "master".to_string());
-    //replication_info.insert("connected_slaves".to_string(), "0".to_string());
-    
+
+    // Check if "replicaof" exists in the config_map
+    if config_map.contains_key("replicaof") {
+        replication_info.insert("role".to_string(), "slave".to_string());
+    } else {
+        replication_info.insert("role".to_string(), "master".to_string());
+    }
+
     db.replication_info = replication_info;
 
+    // Check for RDB file loading
     if let Some(dir) = config_map.get("dir") {
         if let Some(dbfilename) = config_map.get("dbfilename") {
             let rdb_path = Path::new(dir).join(dbfilename);
@@ -57,9 +63,11 @@ fn initialize_database(config_map: &HashMap<String, String>) -> RedisDatabase {
             }
         }
     }
+
     println!("Database data: {:?}", db.data);
     db
 }
+
 
 
 pub fn start_server(config_map: HashMap<String, String>) -> io::Result<()> {
