@@ -45,7 +45,7 @@ fn initialize_database(config_map: &HashMap<String, String>) -> RedisDatabase {
     // Example replication info
     let mut replication_info = HashMap::new();
     replication_info.insert("role".to_string(), "master".to_string());
-    replication_info.insert("connected_slaves".to_string(), "0".to_string());
+    //replication_info.insert("connected_slaves".to_string(), "0".to_string());
     
     db.replication_info = replication_info;
 
