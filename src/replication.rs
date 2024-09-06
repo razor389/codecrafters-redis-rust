@@ -17,9 +17,13 @@ fn send_replconf(stream: &mut TcpStream, port: &str) -> io::Result<()> {
     stream.write_all(replconf_listening_port.as_bytes())?;
     println!("Sent REPLCONF listening-port with port: {}", port);
 
-    // Send REPLCONF capa psync2
-    stream.write_all(b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n")?;
-    println!("Sent REPLCONF capa psync2");
+    // Send REPLCONF capa eof capa psync2
+    stream.write_all(b"*5\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$3\r\neof\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n")?;
+    println!("Sent REPLCONF capa eof capa psync2");
+
+    // Send PSYNC command to the master
+    stream.write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n")?;
+    println!("Sent PSYNC command");
 
     // Keep listening for further commands from the master
     listen_for_master_commands(stream)?;
@@ -44,12 +48,12 @@ fn listen_for_master_commands(stream: &mut TcpStream) -> io::Result<()> {
 
         // Example: if the master sends a PSYNC command, you can handle it here.
         // You could match against specific commands and respond accordingly.
-        if response.contains("PSYNC") {
-            println!("Master requested PSYNC");
+        // if response.contains("PSYNC") {
+        //     println!("Master requested PSYNC");
 
-            // Send back a PSYNC response (this is an example; you'll need to implement real logic here)
-            stream.write_all(b"+FULLRESYNC\r\n")?;
-        }
+        //     // Send back a PSYNC response (this is an example; you'll need to implement real logic here)
+        //     stream.write_all(b"+FULLRESYNC\r\n")?;
+        // }
     }
 
     Ok(())
