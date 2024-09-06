@@ -8,13 +8,20 @@ use crate::database::RedisDatabase;
 
 // Sends REPLCONF commands to the master after receiving the PING response
 fn send_replconf(stream: &mut TcpStream, port: &str) {
-    let replconf_listening_port = format!("*3\r\n$8\r\nREPLCONF\r\n$13\r\nlistening-port\r\n${}\r\n{}\r\n", port.len(), port);
+    // Format the REPLCONF command with the correct Redis RESP protocol
+    let replconf_listening_port = format!(
+        "*3\r\n$8\r\nREPLCONF\r\n$13\r\nlistening-port\r\n${}\r\n{}\r\n",
+        port.len(),
+        port
+    );
+
+    // Send the REPLCONF listening-port command to the master
     stream.write_all(replconf_listening_port.as_bytes()).unwrap();
     println!("Sent REPLCONF listening-port with port: {}", port);
 
-    // Send REPLCONF capa eof
-    stream.write_all(b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n").unwrap();
-    println!("Sent REPLCONF capa psync2");
+    // Send the REPLCONF capa eof command
+    stream.write_all(b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$3\r\neof\r\n").unwrap();
+    println!("Sent REPLCONF capa eof");
 }
 
 
