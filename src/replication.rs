@@ -21,7 +21,7 @@ fn send_replconf(stream: &mut TcpStream, port: &str) {
 
     // Send the REPLCONF capa eof command
     stream.write_all(b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n").unwrap();
-    println!("Sent REPLCONF capa eof");
+    println!("Sent REPLCONF capa psync2");
 }
 
 
