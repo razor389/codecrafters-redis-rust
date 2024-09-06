@@ -80,7 +80,7 @@ pub fn initialize_replication(config_map: &HashMap<String, String>, db: Arc<Mute
                     Ok(_) => {
                         println!("Received PING response from master");
                         // Send REPLCONF commands, using the dynamically provided port
-                        send_replconf(&mut stream, port);
+                        let _ = send_replconf(&mut stream, port);
                     }
                     Err(e) => eprintln!("Failed to receive PING response: {}", e),
                 }
