@@ -1,73 +1,21 @@
-// src/main.rs
-use std::{env, io::{self, Read, Write}, net::{TcpListener, TcpStream}, thread};
-use std::collections::HashMap;
+use std::{env, collections::HashMap, path::Path};
 use std::sync::{Arc, Mutex};
-use crate::parsing::parse_redis_message;
-use crate::database::RedisDatabase;
-use crate::rdb_parser::parse_rdb_file;
-use std::path::Path;
 
+mod replication;
+mod network;
 mod database;
 mod commands;
 mod parsing;
 mod rdb_parser;
 
-pub fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_map: &HashMap<String, String>) -> io::Result<()> {
-    let mut buffer = [0; 512];
-    let mut partial_message = String::new();
+use replication::initialize_replication;
+use network::start_server;
+use database::RedisDatabase;
+use rdb_parser::parse_rdb_file;
 
-    loop {
-        let bytes_read = stream.read(&mut buffer)?;
-
-        if bytes_read == 0 {
-            break;
-        }
-
-        partial_message.push_str(&String::from_utf8_lossy(&buffer[..bytes_read]));
-
-        if partial_message.ends_with("\r\n") {
-            println!("Received message: {}", partial_message);
-            let mut db_lock = db.lock().unwrap();  // Locking the database only when needed
-            let response = parse_redis_message(&partial_message, &mut db_lock, config_map);
-            stream.write_all(response.as_bytes())?;
-            stream.flush()?;
-            partial_message.clear();
-        }
-    }
-
-    Ok(())
-}
-
-
+// Function to initialize the Redis database, including loading from RDB file if available
 fn initialize_database(config_map: &HashMap<String, String>) -> RedisDatabase {
     let mut db = RedisDatabase::new();
-
-    // Example replication info
-    let mut replication_info = HashMap::new();
-
-    // Check if "replicaof" exists in the config_map
-    if config_map.contains_key("replicaof") {
-        replication_info.insert("role".to_string(), "slave".to_string());
-        // Get the value of "replicaof" from the config_map
-        let replicaof = config_map.get("replicaof").unwrap();
-        // Split the value of "replicaof" by the colon character
-        let replicaof_parts: Vec<&str> = replicaof.split(' ').collect();
-        // Get the IP address from the first part of the split value
-        let ip = replicaof_parts[0];
-        // Get the port number from the second part of the split value
-        let port = replicaof_parts[1];
-        // ping the master
-        let address = format!("{}:{}", ip, port);
-        let mut stream = TcpStream::connect(&address).unwrap();
-        //send resp array ping
-        stream.write_all(b"*1\r\n$4\r\nPING\r\n").unwrap();
-    } else {
-        replication_info.insert("role".to_string(), "master".to_string());
-        replication_info.insert("master_replid".to_string(),"8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string());
-        replication_info.insert("master_repl_offset".to_string(), "0".to_string());
-    }
-
-    db.replication_info = replication_info;
 
     // Check for RDB file loading
     if let Some(dir) = config_map.get("dir") {
@@ -83,41 +31,11 @@ fn initialize_database(config_map: &HashMap<String, String>) -> RedisDatabase {
     db
 }
 
-
-
-pub fn start_server(config_map: HashMap<String, String>) -> io::Result<()> {
-    let default_port = "6379".to_string(); // Bind the default value to a variable
-    let port = config_map.get("port").unwrap_or(&default_port); // Borrow either the value from the map or the default value
-    let address = format!("127.0.0.1:{}", port);
-
-    // Start the TCP listener on the chosen address
-    let listener = TcpListener::bind(&address)?;
-
-    println!("Server listening on {}", address);
-    let db = Arc::new(Mutex::new(initialize_database(&config_map)));
-
-    for stream in listener.incoming() {
-        match stream {
-            Ok(mut stream) => {
-                let db = Arc::clone(&db);
-                let config_map = config_map.clone();
-                thread::spawn(move || {
-                    let _ = handle_client(&mut stream, db, &config_map);
-                });
-            }
-            Err(e) => {
-                println!("Connection failed: {}", e);
-            }
-        }
-    }
-    Ok(())
-}
-
-
 fn main() {
     let args: Vec<String> = env::args().collect();
     let mut config_map = HashMap::new();
 
+    // Parse command-line arguments into config_map
     let mut i = 1;
     while i < args.len() {
         let key = &args[i];
@@ -138,6 +56,17 @@ fn main() {
         }
     }
 
+    let default_port = "6379".to_string();
+    let port = config_map.get("port").unwrap_or(&default_port).to_string(); // Capture port
+
     println!("Starting server with config: {:?}", config_map);
-    start_server(config_map).unwrap();
+
+    // Initialize the database
+    let db = Arc::new(Mutex::new(initialize_database(&config_map)));
+
+    // Initialize replication (as slave or master) with the correct port
+    initialize_replication(&config_map, db.clone(), &port);
+
+    // Start the server to handle client connections
+    start_server(config_map, db).unwrap();
 }
