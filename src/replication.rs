@@ -1,4 +1,4 @@
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -7,24 +7,53 @@ use crate::database::RedisDatabase;
 
 
 // Sends REPLCONF commands to the master after receiving the PING response
-fn send_replconf(stream: &mut TcpStream, port: &str) {
-    // Format the REPLCONF command with the correct Redis RESP protocol
+fn send_replconf(stream: &mut TcpStream, port: &str) -> io::Result<()> {
+    // Send REPLCONF listening-port with the correct port
     let replconf_listening_port = format!(
         "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n${}\r\n{}\r\n",
         port.len(),
         port
     );
-
-    // Send the REPLCONF listening-port command to the master
-    stream.write_all(replconf_listening_port.as_bytes()).unwrap();
+    stream.write_all(replconf_listening_port.as_bytes())?;
     println!("Sent REPLCONF listening-port with port: {}", port);
 
-    // Send the REPLCONF capa eof command
-    stream.write_all(b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n").unwrap();
+    // Send REPLCONF capa psync2
+    stream.write_all(b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n")?;
     println!("Sent REPLCONF capa psync2");
+
+    // Keep listening for further commands from the master
+    listen_for_master_commands(stream)?;
+
+    Ok(())
 }
 
+fn listen_for_master_commands(stream: &mut TcpStream) -> io::Result<()> {
+    let mut buffer = [0; 512];
 
+    loop {
+        let bytes_read = stream.read(&mut buffer)?;
+        
+        if bytes_read == 0 {
+            // Master has closed the connection
+            println!("Connection closed by master.");
+            break;
+        }
+
+        let response = String::from_utf8_lossy(&buffer[..bytes_read]);
+        println!("Received from master: {}", response);
+
+        // Example: if the master sends a PSYNC command, you can handle it here.
+        // You could match against specific commands and respond accordingly.
+        if response.contains("PSYNC") {
+            println!("Master requested PSYNC");
+
+            // Send back a PSYNC response (this is an example; you'll need to implement real logic here)
+            stream.write_all(b"+FULLRESYNC\r\n")?;
+        }
+    }
+
+    Ok(())
+}
 
 // Initializes replication settings, determining whether this server is a master or slave
 pub fn initialize_replication(config_map: &HashMap<String, String>, db: Arc<Mutex<RedisDatabase>>, port: &str) {
