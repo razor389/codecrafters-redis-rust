@@ -48,6 +48,19 @@ fn initialize_database(config_map: &HashMap<String, String>) -> RedisDatabase {
     // Check if "replicaof" exists in the config_map
     if config_map.contains_key("replicaof") {
         replication_info.insert("role".to_string(), "slave".to_string());
+        // Get the value of "replicaof" from the config_map
+        let replicaof = config_map.get("replicaof").unwrap();
+        // Split the value of "replicaof" by the colon character
+        let replicaof_parts: Vec<&str> = replicaof.split(':').collect();
+        // Get the IP address from the first part of the split value
+        let ip = replicaof_parts[0];
+        // Get the port number from the second part of the split value
+        let port = replicaof_parts[1];
+        // ping the master
+        let address = format!("{}:{}", ip, port);
+        let mut stream = TcpStream::connect(&address).unwrap();
+        //send resp array ping
+        stream.write_all(b"*1\r\n$4\r\nPING\r\n").unwrap();
     } else {
         replication_info.insert("role".to_string(), "master".to_string());
         replication_info.insert("master_replid".to_string(),"8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string());
