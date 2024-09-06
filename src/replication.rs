@@ -10,7 +10,7 @@ use crate::database::RedisDatabase;
 fn send_replconf(stream: &mut TcpStream, port: &str) {
     // Format the REPLCONF command with the correct Redis RESP protocol
     let replconf_listening_port = format!(
-        "*3\r\n$8\r\nREPLCONF\r\n$13\r\nlistening-port\r\n${}\r\n{}\r\n",
+        "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n${}\r\n{}\r\n",
         port.len(),
         port
     );
