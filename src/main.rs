@@ -51,7 +51,7 @@ fn initialize_database(config_map: &HashMap<String, String>) -> RedisDatabase {
         // Get the value of "replicaof" from the config_map
         let replicaof = config_map.get("replicaof").unwrap();
         // Split the value of "replicaof" by the colon character
-        let replicaof_parts: Vec<&str> = replicaof.split(':').collect();
+        let replicaof_parts: Vec<&str> = replicaof.split(' ').collect();
         // Get the IP address from the first part of the split value
         let ip = replicaof_parts[0];
         // Get the port number from the second part of the split value
