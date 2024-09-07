@@ -82,3 +82,20 @@ pub fn handle_info(db: &RedisDatabase, args: &[String]) -> String {
 pub fn handle_replconf(args: &[String]) -> String {
     "+OK\r\n".to_string()  
 }
+
+pub fn handle_psync(db: &RedisDatabase, args: &[String]) -> String {
+    if args.len() == 3 {
+        if let Some(master_replid) = db.replication_info.get("master_replid") {
+            if let Some(master_repl_offset) = db.replication_info.get("master_repl_offset") {
+                // Return the FULLRESYNC response with master_replid and master_repl_offset
+                format!("+FULLRESYNC {} {}\r\n", master_replid, master_repl_offset)
+            } else {
+                "-ERR no master_repl_offset found\r\n".to_string()
+            }
+        } else {
+            "-ERR no master_replid found\r\n".to_string()
+        }
+    } else {
+        "-ERR wrong number of arguments for 'psync' command\r\n".to_string()
+    }
+}

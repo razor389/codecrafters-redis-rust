@@ -1,6 +1,6 @@
 // src/parsing.rs
 use crate::database::RedisDatabase;
-use crate::commands::{handle_set, handle_get, handle_config, handle_keys, handle_echo, handle_ping, handle_info, handle_replconf};
+use crate::commands::{handle_set, handle_get, handle_config, handle_keys, handle_echo, handle_ping, handle_info, handle_replconf, handle_psync};
 use std::collections::HashMap;
 
 pub fn parse_redis_message(
@@ -36,6 +36,7 @@ pub fn parse_redis_message(
                 Some("PING") => handle_ping(&args),
                 Some("INFO") => handle_info(db, &args),
                 Some("REPLCONF") => handle_replconf(&args),
+                Some("PSYNC") => handle_psync(db, &args),
                 _ => "-ERR unknown command\r\n".to_string(),
             }
         } else {
