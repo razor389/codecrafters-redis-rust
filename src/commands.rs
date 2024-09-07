@@ -80,30 +80,5 @@ pub fn handle_info(db: &RedisDatabase, args: &[String]) -> String {
 }
 
 pub fn handle_replconf(args: &[String]) -> String {
-    if args.len() == 2 && args[0].to_uppercase() == "LISTENING-PORT" {
-        // Handle the REPLCONF listening-port <PORT> command
-        if args[1].parse::<u16>().is_ok() {
-            "+OK\r\n".to_string()
-        } else {
-            "-ERR invalid port\r\n".to_string()
-        }
-    } else if args.len() >= 3 && args[0].to_uppercase() == "CAPA" {
-        // Handle REPLCONF capa <capability>...
-        let mut valid_caps = true;
-
-        for cap in &args[1..] {
-            match cap.to_uppercase().as_str() {
-                "EOF" | "PSYNC2" => continue,
-                _ => valid_caps = false,
-            }
-        }
-
-        if valid_caps {
-            "+OK\r\n".to_string()
-        } else {
-            "-ERR unknown capability\r\n".to_string()
-        }
-    } else {
-        "-ERR wrong number of arguments for 'REPLCONF' command\r\n".to_string()
-    }
+    "+OK\r\n".to_string()  
 }
