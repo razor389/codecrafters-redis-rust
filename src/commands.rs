@@ -120,9 +120,6 @@ pub fn send_rdb_file(stream: &mut TcpStream) -> std::io::Result<()> {
     // Send the raw binary data
     stream.write_all(&binary_data)?;
 
-    // End with trailing \r\n
-    stream.write_all(b"\r\n")?;
-
     Ok(())
 }
 
