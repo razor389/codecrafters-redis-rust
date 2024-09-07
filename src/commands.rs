@@ -103,7 +103,7 @@ pub fn handle_psync(db: &RedisDatabase, args: &[String]) -> String {
     }
 }
 
-// Function to send the RDB file as binary after sending FULLRESYNC
+// Function to send the binary RDB file in RESP bulk string format
 pub fn send_rdb_file(stream: &mut TcpStream) -> std::io::Result<()> {
     // Hex representation of the empty RDB file
     let hex_rdb = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
@@ -111,8 +111,17 @@ pub fn send_rdb_file(stream: &mut TcpStream) -> std::io::Result<()> {
     // Convert hex string to binary
     let binary_data = hex_to_bytes(hex_rdb);
 
-    // Send the raw binary data (no RESP format, just the raw data)
+    // Prepare the length header in RESP format: $<length>\r\n
+    let length_header = format!("${}\r\n", binary_data.len());
+    
+    // Send the length header first
+    stream.write_all(length_header.as_bytes())?;
+
+    // Send the raw binary data
     stream.write_all(&binary_data)?;
+
+    // End with trailing \r\n
+    stream.write_all(b"\r\n")?;
 
     Ok(())
 }

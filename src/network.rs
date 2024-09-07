@@ -59,7 +59,7 @@ fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_m
                 stream.write_all(response.as_bytes())?;
                 stream.flush()?;
 
-                // Send the RDB file as binary data
+                // Send the RDB file in RESP bulk string format
                 send_rdb_file(stream)?;
             } else {
                 // Send the normal response
