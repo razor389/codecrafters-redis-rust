@@ -84,7 +84,7 @@ pub fn handle_replconf(args: &[String]) -> String {
 }
 
 pub fn handle_psync(db: &RedisDatabase, args: &[String]) -> String {
-    if args.len() == 3 {
+    if args.len() == 2 {
         if let Some(master_replid) = db.replication_info.get("master_replid") {
             if let Some(master_repl_offset) = db.replication_info.get("master_repl_offset") {
                 // Return the FULLRESYNC response with master_replid and master_repl_offset
