@@ -79,23 +79,55 @@ pub fn handle_info(db: &RedisDatabase, args: &[String]) -> String {
     }
 }
 
-pub fn handle_replconf(args: &[String]) -> String {
+pub fn handle_replconf(_args: &[String]) -> String {
     "+OK\r\n".to_string()  
 }
+
+// Helper function to convert hex string to bytes
+fn hex_to_bytes(hex: &str) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let mut chars = hex.chars();
+
+    while let (Some(high), Some(low)) = (chars.next(), chars.next()) {
+        let high_digit = high.to_digit(16).unwrap();
+        let low_digit = low.to_digit(16).unwrap();
+        bytes.push((high_digit * 16 + low_digit) as u8);
+    }
+
+    bytes
+}
+
 
 pub fn handle_psync(db: &RedisDatabase, args: &[String]) -> String {
     if args.len() == 2 {
         if let Some(master_replid) = db.replication_info.get("master_replid") {
             if let Some(master_repl_offset) = db.replication_info.get("master_repl_offset") {
-                // Return the FULLRESYNC response with master_replid and master_repl_offset
-                format!("+FULLRESYNC {} {}\r\n", master_replid, master_repl_offset)
+                // Prepare FULLRESYNC response
+                let mut response = format!("+FULLRESYNC {} {}\r\n", master_replid, master_repl_offset);
+
+                // Prepare RDB file content
+                let hex_rdb = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
+                
+                // Convert hex to bytes
+                let binary_data = hex_to_bytes(hex_rdb);
+
+                // Add length of binary data in RESP format: $<length>\r\n<contents>
+                let length_header = format!("${}\r\n", binary_data.len());
+                response.push_str(&length_header);
+
+                // Add binary data (converted to string for simplicity, in real cases this would be raw binary)
+                response.push_str(&String::from_utf8_lossy(&binary_data));
+
+                // Return the complete response
+                return response;
             } else {
-                "-ERR no master_repl_offset found\r\n".to_string()
+                return "-ERR master_repl_offset not found\r\n".to_string();
             }
         } else {
-            "-ERR no master_replid found\r\n".to_string()
+            return "-ERR master_replid not found\r\n".to_string();
         }
     } else {
-        "-ERR wrong number of arguments for 'psync' command\r\n".to_string()
+        return "-ERR wrong number of arguments for 'psync' command\r\n".to_string();
     }
 }
+
