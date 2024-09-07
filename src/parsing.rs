@@ -34,6 +34,9 @@ pub fn parse_redis_message(
                 }
             }
 
+            // Print the array of args for debugging
+            println!("Parsed command: {:?}, Args: {:?}", command, args);
+
             // Ensure the number of collected args matches the declared arg count
             if args.len() + 1 != arg_count {
                 return "-ERR argument count mismatch\r\n".to_string();
