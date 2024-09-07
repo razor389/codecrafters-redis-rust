@@ -1,6 +1,6 @@
 // src/commands.rs
 use crate::database::{RedisDatabase, RedisValue};
-use std::collections::HashMap;
+use std::{collections::HashMap, io::Write, net::TcpStream};
 
 pub fn handle_set(db: &mut RedisDatabase, args: &[String]) -> String {
     if args.len() == 2 {
@@ -83,42 +83,14 @@ pub fn handle_replconf(_args: &[String]) -> String {
     "+OK\r\n".to_string()  
 }
 
-// Helper function to convert hex string to bytes
-fn hex_to_bytes(hex: &str) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    let mut chars = hex.chars();
-
-    while let (Some(high), Some(low)) = (chars.next(), chars.next()) {
-        let high_digit = high.to_digit(16).unwrap();
-        let low_digit = low.to_digit(16).unwrap();
-        bytes.push((high_digit * 16 + low_digit) as u8);
-    }
-
-    bytes
-}
-
-
 pub fn handle_psync(db: &RedisDatabase, args: &[String]) -> String {
     if args.len() == 2 {
         if let Some(master_replid) = db.replication_info.get("master_replid") {
             if let Some(master_repl_offset) = db.replication_info.get("master_repl_offset") {
                 // Prepare FULLRESYNC response
-                let mut response = format!("+FULLRESYNC {} {}\r\n", master_replid, master_repl_offset);
-
-                // Prepare RDB file content
-                let hex_rdb = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
+                let response = format!("+FULLRESYNC {} {}\r\n", master_replid, master_repl_offset);
                 
-                // Convert hex to bytes
-                let binary_data = hex_to_bytes(hex_rdb);
-
-                // Add length of binary data in RESP format: $<length>\r\n<contents>
-                let length_header = format!("${}\r\n", binary_data.len());
-                response.push_str(&length_header);
-
-                // Add binary data (converted to string for simplicity, in real cases this would be raw binary)
-                response.push_str(&String::from_utf8_lossy(&binary_data));
-
-                // Return the complete response
+                // Send only the response part for now
                 return response;
             } else {
                 return "-ERR master_repl_offset not found\r\n".to_string();
@@ -131,3 +103,30 @@ pub fn handle_psync(db: &RedisDatabase, args: &[String]) -> String {
     }
 }
 
+// Function to send the RDB file as binary after sending FULLRESYNC
+pub fn send_rdb_file(stream: &mut TcpStream) -> std::io::Result<()> {
+    // Hex representation of the empty RDB file
+    let hex_rdb = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
+
+    // Convert hex string to binary
+    let binary_data = hex_to_bytes(hex_rdb);
+
+    // Send the raw binary data (no RESP format, just the raw data)
+    stream.write_all(&binary_data)?;
+
+    Ok(())
+}
+
+// Helper function to convert hex string to bytes
+fn hex_to_bytes(hex: &str) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let mut chars = hex.chars();
+
+    while let (Some(high), Some(low)) = (chars.next(), chars.next()) {
+        let high_digit = high.to_digit(16).expect("Invalid hex character");
+        let low_digit = low.to_digit(16).expect("Invalid hex character");
+        bytes.push((high_digit * 16 + low_digit) as u8);
+    }
+
+    bytes
+}

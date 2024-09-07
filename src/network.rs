@@ -3,6 +3,7 @@ use std::net::{TcpListener, TcpStream};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use crate::commands::send_rdb_file;
 use crate::database::RedisDatabase;
 use crate::parsing::parse_redis_message;
 
@@ -51,7 +52,20 @@ fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_m
             println!("Received message: {}", partial_message);
             let mut db_lock = db.lock().unwrap();
             let response = parse_redis_message(&partial_message, &mut db_lock, config_map);
-            stream.write_all(response.as_bytes())?;
+
+            // Check if the response is a FULLRESYNC message
+            if response.starts_with("+FULLRESYNC") {
+                // Write the FULLRESYNC response first
+                stream.write_all(response.as_bytes())?;
+                stream.flush()?;
+
+                // Send the RDB file as binary data
+                send_rdb_file(stream)?;
+            } else {
+                // Send the normal response
+                stream.write_all(response.as_bytes())?;
+            }
+
             stream.flush()?;
             partial_message.clear();
         }
