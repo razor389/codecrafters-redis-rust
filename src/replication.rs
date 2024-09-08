@@ -73,10 +73,14 @@ fn listen_for_master_commands(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabas
                 // Store master_replid and master_offset in your RedisDatabase replication state (lock briefly)
                 {
                     println!("Storing master_replid and master_offset in the database.");
-                    let mut db_lock = db.lock().unwrap();
-                    println!("Database lock acquired.");
-                    db_lock.replication_info.insert("master_replid".to_string(), master_replid.to_string());
-                    db_lock.replication_info.insert("master_repl_offset".to_string(), master_offset.to_string());
+                    if let Ok(mut db_lock) = db.try_lock() {
+                        println!("Database lock acquired.");
+                        db_lock.replication_info.insert("master_replid".to_string(), master_replid.to_string());
+                        db_lock.replication_info.insert("master_repl_offset".to_string(), master_offset.to_string());
+                    } else {
+                        eprintln!("Failed to acquire lock to store replication info.");
+                        continue;
+                    }
                 }
 
                 // After FULLRESYNC, we expect an RDB file as a bulk string
@@ -111,7 +115,14 @@ fn listen_for_master_commands(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabas
                     println!("Successfully received the full RDB file.");
 
                     // Lock database and store/process the RDB data
-                    todo!("Store the RDB data in the database");
+                    {
+                        if let Ok(mut db_lock) = db.try_lock() {
+                            println!("Storing RDB data into the database.");
+                            todo!("Store the RDB data into the database.");
+                        } else {
+                            eprintln!("Failed to acquire lock to store RDB data.");
+                        }
+                    }
 
                 } else {
                     println!("Failed to receive the full RDB file. Expected {} bytes, but got {} bytes.", length, bytes_read);
@@ -122,18 +133,22 @@ fn listen_for_master_commands(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabas
             if message == "+OK\r\n" {
                 continue; // Ignore PING responses
             }
+
             // Parse the Redis message and get the response for other commands
-            let mut db_lock = db.lock().unwrap();
-            let (command, response) = parse_redis_message(&message, &mut db_lock, config_map);
+            if let Ok(mut db_lock) = db.try_lock() {
+                let (command, response) = parse_redis_message(&message, &mut db_lock, config_map);
 
-            // Log the command and response for debugging purposes
-            println!("Parsed command: {:?}, Response: {}", command, response);
+                // Log the command and response for debugging purposes
+                println!("Parsed command: {:?}, Response: {}", command, response);
 
-            // Only send responses back for certain commands (e.g., PSYNC), no "OK" for most
-            if let Some(cmd) = command {
-                if cmd == "PSYNC" {
-                    stream.write_all(response.as_bytes())?;
+                // Only send responses back for certain commands (e.g., PSYNC), no "OK" for most
+                if let Some(cmd) = command {
+                    if cmd == "PSYNC" {
+                        stream.write_all(response.as_bytes())?;
+                    }
                 }
+            } else {
+                eprintln!("Failed to acquire lock for command processing.");
             }
         }
     }
