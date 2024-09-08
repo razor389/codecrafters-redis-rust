@@ -60,9 +60,8 @@ fn listen_for_master_commands(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabas
         let message = String::from_utf8_lossy(&buffer[..bytes_read]);
         println!("Received message from master: {}", message);
 
-        // Handle FULLRESYNC and RDB file transfer (indicating an empty database)
+        // Check for FULLRESYNC message
         if message.starts_with("+FULLRESYNC") {
-            // Parse the FULLRESYNC response, which contains the master replication ID and offset
             let parts: Vec<&str> = message.split_whitespace().collect();
             if parts.len() >= 3 {
                 let master_replid = parts[1];
@@ -70,31 +69,49 @@ fn listen_for_master_commands(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabas
 
                 println!("Received FULLRESYNC with replid: {} and offset: {}", master_replid, master_offset);
 
-                // Store master_replid and master_offset in your RedisDatabase replication state (lock briefly)
+                // Store master_replid and master_offset in the Redis database
                 {
                     let mut db_lock = db.lock().unwrap();
                     db_lock.replication_info.insert("master_replid".to_string(), master_replid.to_string());
                     db_lock.replication_info.insert("master_repl_offset".to_string(), master_offset.to_string());
                 }
 
-                // After FULLRESYNC, we expect an empty RDB file as an indicator (skip processing)
-                println!("Empty RDB file received. Ready to handle commands.");
+                println!("Waiting for the RDB file...");
             }
         }
-        // Handle any subsequent commands sent by the master
+        // Handle RDB file as a bulk string (starts with $)
+        else if message.starts_with('$') {
+            if let Some((length_str, _)) = message[1..].split_once("\r\n") {
+                let length: usize = length_str.parse().unwrap();
+                println!("Expecting RDB file of length: {}", length);
+
+                // Read the entire RDB file
+                let mut rdb_data = vec![0u8; length];
+                stream.read_exact(&mut rdb_data)?;
+
+                // Process RDB data (you can implement your own logic here)
+                println!("Received RDB file of size: {}", rdb_data.len());
+
+                println!("RDB file received and processed.");
+                continue;
+            }
+        }
+        // Handle Redis commands after the RDB is processed
         else {
             println!("Received command from master: {}", message);
+
             if message == "+OK\r\n" {
-                continue;
-            } 
-            // Parse the Redis message and get the response for commands like SET
+                continue; // Ignore PING responses
+            }
+
+            // Parse the Redis message and handle commands like SET, GET, etc.
             if let Ok(mut db_lock) = db.try_lock() {
                 let (command, response) = parse_redis_message(&message, &mut db_lock, config_map);
 
                 // Log the command and response for debugging purposes
                 println!("Parsed command: {:?}, Response: {}", command, response);
 
-                // Only send responses back for certain commands (e.g., PSYNC)
+                // Only send responses back for certain commands (e.g., PSYNC, SET, GET)
                 if let Some(cmd) = command {
                     if cmd == "PSYNC" || cmd == "SET" || cmd == "GET" {
                         stream.write_all(response.as_bytes())?;
