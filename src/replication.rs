@@ -108,12 +108,8 @@ fn listen_for_master_commands(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabas
                     println!("Successfully received the full RDB file.");
 
                     // Lock database and store/process the RDB data
-                    {
-                        let mut db_lock = db.lock().unwrap();
-                        db_lock.load_rdb_data(rdb_data);
-                    }
+                    todo!("Store the RDB data in the database");
 
-                    println!("RDB file received and processed.");
                 } else {
                     println!("Failed to receive the full RDB file. Expected {} bytes, but got {} bytes.", length, bytes_read);
                 }
