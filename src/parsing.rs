@@ -7,7 +7,7 @@ pub fn parse_redis_message(
     message: &str,
     db: &mut RedisDatabase,
     config_map: &HashMap<String, String>,
-) -> String {
+) -> (Option<String>, String) {
     let mut lines = message.lines();
 
     if let Some(line) = lines.next() {
@@ -34,16 +34,16 @@ pub fn parse_redis_message(
                 }
             }
 
-            // Print the array of args for debugging
+            // Debugging output for parsed command and arguments
             println!("Parsed command: {:?}, Args: {:?}", command, args);
 
             // Ensure the number of collected args matches the declared arg count
             if args.len() + 1 != arg_count {
-                return "-ERR argument count mismatch\r\n".to_string();
+                return (command, "-ERR argument count mismatch\r\n".to_string());
             }
 
             // Match the command with appropriate handler
-            match command.as_deref() {
+            let response = match command.as_deref() {
                 Some("SET") => handle_set(db, &args),
                 Some("GET") => handle_get(db, &args),
                 Some("CONFIG") => handle_config(config_map, &args),
@@ -54,11 +54,13 @@ pub fn parse_redis_message(
                 Some("REPLCONF") => handle_replconf(&args),
                 Some("PSYNC") => handle_psync(db, &args),
                 _ => "-ERR unknown command\r\n".to_string(),
-            }
+            };
+
+            return (command, response);
         } else {
-            "-ERR invalid format\r\n".to_string()
+            return (None, "-ERR invalid format\r\n".to_string());
         }
     } else {
-        "-ERR empty message\r\n".to_string()
+        return (None, "-ERR empty message\r\n".to_string());
     }
 }

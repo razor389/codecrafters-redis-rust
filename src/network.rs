@@ -35,32 +35,11 @@ pub fn start_server(config_map: HashMap<String, String>, db: Arc<Mutex<RedisData
 }
 
 // Handles a single client connection
-// Parse the RESP message to extract the command
-fn extract_command_from_resp(message: &str) -> Option<String> {
-    let lines: Vec<&str> = message.split("\r\n").collect();
-    
-    if lines.len() >= 3 && lines[0].starts_with('*') && lines[2].starts_with('$') {
-        // Command is typically in the third line (e.g., "PING")
-        return Some(lines[2].to_string().to_uppercase());
-    }
-    
-    None
-}
-
-// Filter based on the extracted command, not the full RESP message
-fn should_forward_to_slaves(command: &str) -> bool {
-    if let Some(parsed_command) = extract_command_from_resp(command) {
-        println!("Extracted command: {}", parsed_command);
-
-        // Ignore replication-specific commands (PING, REPLCONF, PSYNC)
-        let ignored_commands = vec!["PING", "REPLCONF", "PSYNC"];
-        return !ignored_commands.contains(&parsed_command.as_str());
-    }
-
-    true // Default: forward the command if not matched
-}
-
-fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_map: &HashMap<String, String>) -> io::Result<()> {
+fn handle_client(
+    stream: &mut TcpStream,
+    db: Arc<Mutex<RedisDatabase>>,
+    config_map: &HashMap<String, String>,
+) -> io::Result<()> {
     let mut buffer = [0; 1024]; // Buffer size
     let mut partial_message = String::new();
 
@@ -77,19 +56,15 @@ fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_m
             println!("Received message: {}", partial_message);
 
             let mut db_lock = db.lock().unwrap();
-            let response = parse_redis_message(&partial_message, &mut db_lock, config_map);
+            let (command, response) = parse_redis_message(&partial_message, &mut db_lock, config_map);
 
-            if response.starts_with("+FULLRESYNC") {
-                stream.write_all(response.as_bytes())?;
-                stream.flush()?;
-                send_rdb_file(stream)?;
-                db_lock.slave_connections.push(Arc::new(Mutex::new(stream.try_clone()?)));
-            } else {
-                stream.write_all(response.as_bytes())?;
-                stream.flush()?;
+            // Write the response to the client
+            stream.write_all(response.as_bytes())?;
+            stream.flush()?;
 
-                // Check if this command should be forwarded to slaves
-                if should_forward_to_slaves(&partial_message) {
+            // Only forward certain commands to slaves
+            if let Some(cmd) = command {
+                if should_forward_to_slaves(&cmd) {
                     for slave_connection in &db_lock.slave_connections {
                         let mut slave_stream = slave_connection.lock().unwrap();
                         println!("Forwarding message to slave: {}", partial_message);
@@ -104,4 +79,11 @@ fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_m
     }
 
     Ok(())
+}
+
+fn should_forward_to_slaves(command: &str) -> bool {
+    match command {
+        "SET" | "GET" | "DEL" | "INCR" | "DECR" | "MSET" | "MGET" => true,
+        _ => false, // Do not forward protocol-related commands like PING, REPLCONF, PSYNC, etc.
+    }
 }
