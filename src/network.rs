@@ -58,28 +58,45 @@ fn handle_client(
             let mut db_lock = db.lock().unwrap();
             let (command, response) = parse_redis_message(&partial_message, &mut db_lock, config_map);
 
-            // Write the response to the client
-            stream.write_all(response.as_bytes())?;
-            stream.flush()?;
+            // Handle FULLRESYNC
+            if response.starts_with("+FULLRESYNC") {
+                // Send the FULLRESYNC response first
+                stream.write_all(response.as_bytes())?;
+                stream.flush()?;
 
-            // Only forward certain commands to slaves
-            if let Some(cmd) = command {
-                if should_forward_to_slaves(&cmd) {
-                    for slave_connection in &db_lock.slave_connections {
-                        let mut slave_stream = slave_connection.lock().unwrap();
-                        println!("Forwarding message to slave: {}", partial_message);
-                        slave_stream.write_all(partial_message.as_bytes())?;
-                        slave_stream.flush()?;
+                // Send the RDB file to the client (slave)
+                send_rdb_file(stream)?;
+                println!("Sent RDB file after FULLRESYNC");
+
+                // Add the slave connection to the list of slaves
+                db_lock.slave_connections.push(Arc::new(Mutex::new(stream.try_clone()?)));
+                println!("Added new slave after FULLRESYNC");
+
+            } else {
+                // Write the response to the client
+                stream.write_all(response.as_bytes())?;
+                stream.flush()?;
+
+                // Forward the command to all connected slaves if applicable
+                if let Some(cmd) = command {
+                    if should_forward_to_slaves(&cmd) {
+                        for slave_connection in &db_lock.slave_connections {
+                            let mut slave_stream = slave_connection.lock().unwrap();
+                            println!("Forwarding message to slave: {}", partial_message);
+                            slave_stream.write_all(partial_message.as_bytes())?;
+                            slave_stream.flush()?;
+                        }
                     }
                 }
             }
 
-            partial_message.clear(); // Reset message buffer
+            partial_message.clear(); // Reset message buffer for the next command
         }
     }
 
     Ok(())
 }
+
 
 fn should_forward_to_slaves(command: &str) -> bool {
     match command {
