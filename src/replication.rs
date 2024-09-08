@@ -4,10 +4,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use crate::database::RedisDatabase;
-
+use crate::parsing::parse_redis_message;
 
 // Sends REPLCONF commands to the master after receiving the PING response
-fn send_replconf(stream: &mut TcpStream, port: &str) -> io::Result<()> {
+fn send_replconf(stream: &mut TcpStream, port: &str, db: Arc<Mutex<RedisDatabase>>, config_map: &HashMap<String, String>) -> io::Result<()> {
     // Send REPLCONF listening-port with the correct port
     let replconf_listening_port = format!(
         "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n${}\r\n{}\r\n",
@@ -21,39 +21,58 @@ fn send_replconf(stream: &mut TcpStream, port: &str) -> io::Result<()> {
     stream.write_all(b"*5\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$3\r\neof\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n")?;
     println!("Sent REPLCONF capa eof capa psync2");
 
-    // Keep listening for further commands from the master
-    listen_for_master_commands(stream)?;
+    // Wait for +OK response from the master
+    let mut buffer = [0; 512];
+    let bytes_read = stream.read(&mut buffer)?;
+    let response = String::from_utf8_lossy(&buffer[..bytes_read]);
+    
+    if response.contains("+OK") {
+        println!("Received +OK from master, proceeding with PSYNC");
+
+        // Send PSYNC command to the master after receiving +OK
+        stream.write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n")?;
+        println!("Sent PSYNC command");
+
+        // Keep listening for further commands from the master and pass the db for command execution
+        listen_for_master_commands(stream, db, config_map)?;
+    } else {
+        println!("Unexpected response from master: {}", response);
+    }
 
     Ok(())
 }
 
-fn listen_for_master_commands(stream: &mut TcpStream) -> io::Result<()> {
-    let mut buffer = [0; 512];
+// Listens for and processes commands sent by the master
+fn listen_for_master_commands(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_map: &HashMap<String, String>) -> io::Result<()> {
+    let mut buffer = [0; 512];  // Buffer to store incoming data
 
     loop {
+        // Read from the master
         let bytes_read = stream.read(&mut buffer)?;
-        
+
         if bytes_read == 0 {
             // Master has closed the connection
             println!("Connection closed by master.");
             break;
         }
 
-        let response = String::from_utf8_lossy(&buffer[..bytes_read]);
-        println!("Received from master: {}", response);
+        // Convert the response into a string to handle the command
+        let message = String::from_utf8_lossy(&buffer[..bytes_read]);
+        println!("Received message from master: {}", message);
 
-        // Send PSYNC command to the master
-        stream.write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n")?;
-        println!("Sent PSYNC command");
+        // Parse the Redis message and get the response
+        let mut db_lock = db.lock().unwrap();
+        let (command, response) = parse_redis_message(&message, &mut db_lock, config_map);
 
-        // Example: if the master sends a PSYNC command, you can handle it here.
-        // You could match against specific commands and respond accordingly.
-        // if response.contains("PSYNC") {
-        //     println!("Master requested PSYNC");
+        // Log the command and response for debugging purposes
+        println!("Parsed command: {:?}, Response: {}", command, response);
 
-        //     // Send back a PSYNC response (this is an example; you'll need to implement real logic here)
-        //     stream.write_all(b"+FULLRESYNC\r\n")?;
-        // }
+        // Only send responses back for certain commands (e.g., PSYNC), no "OK" for most
+        if let Some(cmd) = command {
+            if cmd == "PSYNC" {
+                stream.write_all(response.as_bytes())?;
+            }
+        }
     }
 
     Ok(())
@@ -83,8 +102,8 @@ pub fn initialize_replication(config_map: &HashMap<String, String>, db: Arc<Mute
                 match stream.read(&mut buffer) {
                     Ok(_) => {
                         println!("Received PING response from master");
-                        // Send REPLCONF commands, using the dynamically provided port
-                        let _ = send_replconf(&mut stream, port);
+                        // Send REPLCONF commands and PSYNC, using the dynamically provided port
+                        let _ = send_replconf(&mut stream, port, db.clone(), config_map);
                     }
                     Err(e) => eprintln!("Failed to receive PING response: {}", e),
                 }
