@@ -68,15 +68,18 @@ fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_m
                 db_lock.slave_connections.push(Arc::new(Mutex::new(stream.try_clone()?)));
                 println!("Added new slave at {}", peer_addr);
             } else {
-                // Send the normal response
+                // Send the normal response to the client
                 stream.write_all(response.as_bytes())?;
                 
-                // Forward the command to all connected slaves (including the current client if it's a slave)
-                for slave_connection in &db_lock.slave_connections {
-                    let mut slave_stream = slave_connection.lock().unwrap();
-                    println!("Forwarding message to slave: {}", partial_message);
-                    slave_stream.write_all(partial_message.as_bytes())?;
-                    slave_stream.flush()?;
+                // Filter commands that should be forwarded to slaves
+                if should_forward_to_slaves(&partial_message) {
+                    // Forward the command to all connected slaves
+                    for slave_connection in &db_lock.slave_connections {
+                        let mut slave_stream = slave_connection.lock().unwrap();
+                        println!("Forwarding message to slave: {}", partial_message);
+                        slave_stream.write_all(partial_message.as_bytes())?;
+                        slave_stream.flush()?;
+                    }
                 }
             }
 
@@ -86,4 +89,16 @@ fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_m
     }
 
     Ok(())
+}
+
+// Helper function to filter commands that should be forwarded to slaves
+fn should_forward_to_slaves(command: &str) -> bool {
+    // Parse the command and check if it is a data-modifying command
+    let relevant_commands = vec!["SET", "DEL", "INCR", "DECR", "HMSET", "HSET", "LPUSH", "RPUSH", "SADD"];
+    
+    if let Some(cmd) = command.split_whitespace().next() {
+        return relevant_commands.contains(&cmd.to_uppercase().as_str());
+    }
+
+    false
 }
