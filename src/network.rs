@@ -72,7 +72,7 @@ fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_m
                 stream.write_all(response.as_bytes())?;
                 stream.flush()?;
 
-                // Ensure only data modification commands are forwarded to slaves
+                // FORWARD ALL NON-REPLICATION COMMANDS
                 if should_forward_to_slaves(&partial_message) {
                     // Forward the command to all connected slaves
                     for slave_connection in &db_lock.slave_connections {
@@ -92,14 +92,17 @@ fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_m
     Ok(())
 }
 
-// Helper function to filter commands that should be forwarded to slaves
+// Simplified command forwarding decision
 fn should_forward_to_slaves(command: &str) -> bool {
-    // Define relevant commands that modify data and should be replicated
-    let relevant_commands = vec!["SET", "DEL", "INCR", "DECR", "HMSET", "HSET", "LPUSH", "RPUSH", "SADD"];
+    // Log the commands being checked for forwarding
+    println!("Checking if command should be forwarded: {}", command);
+
+    // Ignore only administrative/replication commands (like PING, REPLCONF, PSYNC)
+    let ignored_commands = vec!["PING", "REPLCONF", "PSYNC"];
     
     if let Some(cmd) = command.split_whitespace().next() {
-        return relevant_commands.contains(&cmd.to_uppercase().as_str());
+        return !ignored_commands.contains(&cmd.to_uppercase().as_str());
     }
 
-    false
+    true // Default: forward everything else
 }
