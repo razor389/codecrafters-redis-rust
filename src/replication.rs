@@ -43,172 +43,70 @@ fn send_replconf(stream: &mut TcpStream, port: &str, db: Arc<Mutex<RedisDatabase
 }
 
 // Listens for and processes commands sent by the master
-// src/rdb_parser.rs
-use std::fs;
-use std::io::{self, Read};
-use std::time::{Duration, SystemTime};
-use crate::database::{RedisDatabase, RedisValue};
+fn listen_for_master_commands(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_map: &HashMap<String, String>) -> io::Result<()> {
+    let mut buffer = [0; 512];  // Buffer to store incoming data
 
-fn read_u8(buffer: &[u8], cursor: &mut usize) -> io::Result<u8> {
-    if *cursor < buffer.len() {
-        let byte = buffer[*cursor];
-        *cursor += 1;
-        Ok(byte)
-    } else {
-        Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Reached end of buffer"))
-    }
-}
+    loop {
+        // Read from the master
+        let bytes_read = stream.read(&mut buffer)?;
 
-fn read_uint_le(buffer: &[u8], cursor: &mut usize, n: usize) -> io::Result<u64> {
-    if *cursor + n <= buffer.len() {
-        let mut value = 0u64;
-        for i in 0..n {
-            value |= (buffer[*cursor + i] as u64) << (i * 8);
-        }
-        *cursor += n;
-        Ok(value)
-    } else {
-        Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Reached end of buffer"))
-    }
-}
-
-fn decode_size(buffer: &[u8], cursor: &mut usize) -> io::Result<u64> {
-    let first_byte = read_u8(buffer, cursor)?;
-    let size = match first_byte >> 6 {
-        0b00 => u64::from(first_byte & 0x3F),
-        0b01 => {
-            let second_byte = read_u8(buffer, cursor)?;
-            u64::from(first_byte & 0x3F) << 8 | u64::from(second_byte)
-        },
-        0b10 => read_uint_le(buffer, cursor, 4)?,
-        _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "Unexpected string encoding type")),
-    };
-    Ok(size)
-}
-
-fn read_string(buffer: &[u8], cursor: &mut usize) -> io::Result<String> {
-    let first_byte = read_u8(buffer, cursor)?;
-
-    if (first_byte & 0xC0) == 0xC0 {
-        match first_byte {
-            0xC0 => {
-                let value = read_u8(buffer, cursor)?;
-                Ok(value.to_string())
-            },
-            0xC1 => {
-                let value = read_uint_le(buffer, cursor, 2)?;
-                Ok(value.to_string())
-            },
-            0xC2 => {
-                let value = read_uint_le(buffer, cursor, 4)?;
-                Ok(value.to_string())
-            },
-            0xC3 => Err(io::Error::new(io::ErrorKind::InvalidData, "LZF compressed strings are not supported")),
-            _ => Err(io::Error::new(io::ErrorKind::InvalidData, "Unknown string encoding type")),
-        }
-    } else {
-        let size = match first_byte >> 6 {
-            0b00 => u64::from(first_byte & 0x3F),
-            0b01 => {
-                let second_byte = read_u8(buffer, cursor)?;
-                u64::from(first_byte & 0x3F) << 8 | u64::from(second_byte)
-            },
-            0b10 => read_uint_le(buffer, cursor, 4)?,
-            _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "Unexpected string encoding type")),
-        };
-
-        let string_bytes = &buffer[*cursor..*cursor + size as usize];
-        *cursor += size as usize;
-        Ok(String::from_utf8_lossy(string_bytes).into_owned())
-    }
-}
-
-
-pub fn parse_rdb_file(file_path: &str, db: &mut RedisDatabase) -> io::Result<()> {
-    let mut file = fs::File::open(file_path)?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)?;
-
-    println!("File content in bytes:");
-    for (i, byte) in buffer.iter().enumerate() {
-        // Print the byte as a hexadecimal value along with its index
-        print!("{:02X} ", byte);
-        if (i + 1) % 16 == 0 {
-            println!(); // New line every 16 bytes for readability
-        }
-    }
-    println!(); // Final newline after the last line
-
-
-    let mut cursor = 0;
-    let mut current_ttl: Option<u64> = None;
-
-    // Validate header
-    let header = &buffer[0..5]; // Only check the first 5 bytes ("REDIS")
-    let header_str = String::from_utf8_lossy(header);
-    if header_str != "REDIS" {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid RDB file header"));
-    }
-    cursor += 9;
-
-    // Handle metadata sections
-    while let Ok(byte) = read_u8(&buffer, &mut cursor) {
-        if byte == 0xFA {
-            let _meta_key = read_string(&buffer, &mut cursor)?;
-            let _meta_value = read_string(&buffer, &mut cursor)?;
-        } else {
-            cursor -= 1;
+        if bytes_read == 0 {
+            // Master has closed the connection
+            println!("Connection closed by master.");
             break;
         }
-    }
 
-    // Parse key-value pairs with TTL
-    while let Ok(byte) = read_u8(&buffer, &mut cursor) {
-        match byte {
-            0xFD => { // Expiration timestamp in seconds
-                println!("Debug: Found key with expiration timestamp in seconds.");
-                let expire_seconds = read_uint_le(&buffer, &mut cursor, 4)?;
-                let now_seconds = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or(Duration::ZERO).as_secs();
-                println!("Debug: Current time in seconds: {}", now_seconds);
-                println!("Debug: Expiration time in seconds: {}", expire_seconds);
-                current_ttl = if expire_seconds > now_seconds {
-                    Some((expire_seconds - now_seconds) * 1000) // Convert to milliseconds
-                } else {
-                    Some(0)  // Already expired
-                };
-            },
-            0xFC => { // Expiration timestamp in milliseconds
-                println!("Debug: Found key with expiration timestamp in milliseconds.");
-                let expire_milliseconds = read_uint_le(&buffer, &mut cursor, 8)?;
-                let now_millis = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or(Duration::ZERO).as_millis() as u64;
-                println!("Debug: Current time in milliseconds: {}", now_millis);
-                current_ttl = if expire_milliseconds > now_millis {
-                    Some(expire_milliseconds - now_millis)
-                } else {
-                    Some(0)  // Already expired
-                };
-            },
-            0xFE => { decode_size(&buffer, &mut cursor)?; }, // Start of database subsection
-            0xFB => {
-                decode_size(&buffer, &mut cursor)?; // Key hash table size
-                decode_size(&buffer, &mut cursor)?; // Expire hash table size
-            },
-            0x00 | 0x01 | 0x02 | 0x03 => {
-                let key = read_string(&buffer, &mut cursor)?;
-                let value = read_string(&buffer, &mut cursor)?;
-                println!("Debug: Inserting key-value pair. Key: {}, Value: {}, TTL: {:?}", key, value, current_ttl);
-                db.insert(key, RedisValue::new(value, current_ttl)); // Insert with TTL in milliseconds
-                current_ttl = None; // Reset TTL after insertion
-            },
-            0xFF => { break; }, // End of file section
-            _ => {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "Unknown byte in RDB file"));
+        // Convert the response into a string to handle the command
+        let message = String::from_utf8_lossy(&buffer[..bytes_read]);
+        println!("Received message from master: {}", message);
+
+        // Handle FULLRESYNC and RDB file transfer (indicating an empty database)
+        if message.starts_with("+FULLRESYNC") {
+            // Parse the FULLRESYNC response, which contains the master replication ID and offset
+            let parts: Vec<&str> = message.split_whitespace().collect();
+            if parts.len() >= 3 {
+                let master_replid = parts[1];
+                let master_offset = parts[2];
+
+                println!("Received FULLRESYNC with replid: {} and offset: {}", master_replid, master_offset);
+
+                // Store master_replid and master_offset in your RedisDatabase replication state (lock briefly)
+                {
+                    let mut db_lock = db.lock().unwrap();
+                    db_lock.replication_info.insert("master_replid".to_string(), master_replid.to_string());
+                    db_lock.replication_info.insert("master_repl_offset".to_string(), master_offset.to_string());
+                }
+
+                // After FULLRESYNC, we expect an empty RDB file as an indicator (skip processing)
+                println!("Empty RDB file received. Ready to handle commands.");
+            }
+        }
+        // Handle any subsequent commands sent by the master
+        else {
+            println!("Received command from master: {}", message);
+
+            // Parse the Redis message and get the response for commands like SET
+            if let Ok(mut db_lock) = db.try_lock() {
+                let (command, response) = parse_redis_message(&message, &mut db_lock, config_map);
+
+                // Log the command and response for debugging purposes
+                println!("Parsed command: {:?}, Response: {}", command, response);
+
+                // Only send responses back for certain commands (e.g., PSYNC)
+                if let Some(cmd) = command {
+                    if cmd == "PSYNC" || cmd == "SET" || cmd == "GET" {
+                        stream.write_all(response.as_bytes())?;
+                    }
+                }
+            } else {
+                eprintln!("Failed to acquire lock for command processing.");
             }
         }
     }
-    
+
     Ok(())
 }
+
 // Initializes replication settings, determining whether this server is a master or slave
 pub fn initialize_replication(config_map: &HashMap<String, String>, db: Arc<Mutex<RedisDatabase>>, port: &str) {
     // Acquire the lock only to update the replication info, then release it
@@ -257,4 +155,3 @@ pub fn initialize_replication(config_map: &HashMap<String, String>, db: Arc<Mute
         } // Lock is released here
     }
 }
-
