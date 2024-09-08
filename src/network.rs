@@ -64,8 +64,16 @@ fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_m
             } else {
                 // Send the normal response
                 stream.write_all(response.as_bytes())?;
+                // Forward the command to all connected slaves
+                for slave_connection in &db_lock.slave_connections {
+                    let mut slave_stream = slave_connection.lock().unwrap();
+                    println!("Forwarding message to slave: {}", partial_message);
+                    slave_stream.write_all(partial_message.as_bytes())?;
+                    slave_stream.flush()?;
+                }
             }
 
+            
             stream.flush()?;
             partial_message.clear();
         }

@@ -75,6 +75,9 @@ pub fn initialize_replication(config_map: &HashMap<String, String>, db: Arc<Mute
             Ok(mut stream) => {
                 println!("Connected to master at {}", address);
 
+                // Store the new slave connection in the vector
+                db_lock.slave_connections.push(Arc::new(Mutex::new(stream.try_clone().unwrap())));
+
                 // Send PING to the master
                 stream.write_all(b"*1\r\n$4\r\nPING\r\n").unwrap();
                 stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap(); // Timeout for PING response

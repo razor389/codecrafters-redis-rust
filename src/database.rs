@@ -1,17 +1,22 @@
 // src/database.rs
 use std::collections::HashMap;
+use std::net::TcpStream;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use std::vec;
 
 pub struct RedisDatabase {
     pub data: HashMap<String, RedisValue>,
     pub replication_info: HashMap<String, String>,
+    pub slave_connections: Vec<Arc<Mutex<TcpStream>>>, // Changed to store multiple slave connections
 }
 
 impl RedisDatabase {
     pub fn new() -> Self {
         Self {
             data: HashMap::new(),
-            replication_info: HashMap::new(), // Initialize the replication info
+            replication_info: HashMap::new(),
+            slave_connections: vec![], // Initialize the replication info
         }
     }
 
