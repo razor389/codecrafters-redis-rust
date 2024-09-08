@@ -60,9 +60,25 @@ fn listen_for_master_commands(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabas
         let message = String::from_utf8_lossy(&buffer[..bytes_read]);
         println!("Received message from master: {}", message);
 
-        // Check if we received an RDB bulk string
-        if message.starts_with("$") {
-            // Parse the bulk string length
+        // Check if we received a FULLRESYNC message
+        if message.starts_with("+FULLRESYNC") {
+            // Parse the FULLRESYNC response, which contains the master replication ID and offset
+            let parts: Vec<&str> = message.split_whitespace().collect();
+            if parts.len() >= 3 {
+                let master_replid = parts[1];
+                let master_offset = parts[2];
+
+                println!("Received FULLRESYNC with replid: {} and offset: {}", master_replid, master_offset);
+
+                // You can store master_replid and master_offset in your RedisDatabase replication state
+                let mut db_lock = db.lock().unwrap();
+                db_lock.replication_info.insert("master_replid".to_string(), master_replid.to_string());
+                db_lock.replication_info.insert("master_repl_offset".to_string(), master_offset.to_string());
+            }
+        }
+        // Handle the bulk string for the RDB file transfer
+        else if message.starts_with("$") {
+            // Parse the bulk string length (the RDB file length)
             if let Some((length, _)) = message[1..].split_once("\r\n") {
                 let length: usize = length.parse().unwrap();
                 println!("Expecting RDB file of length: {}", length);
@@ -78,7 +94,7 @@ fn listen_for_master_commands(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabas
                 println!("RDB file received and processed.");
             }
         } else {
-            // Parse the Redis message and get the response
+            // Parse the Redis message and get the response for other commands
             let mut db_lock = db.lock().unwrap();
             let (command, response) = parse_redis_message(&message, &mut db_lock, config_map);
 
