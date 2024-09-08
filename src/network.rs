@@ -36,9 +36,9 @@ pub fn start_server(config_map: HashMap<String, String>, db: Arc<Mutex<RedisData
 
 // Handles a single client connection
 fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_map: &HashMap<String, String>) -> io::Result<()> {
-    let mut buffer = [0; 1024]; // Increased buffer size
+    let mut buffer = [0; 1024]; // Buffer size
     let mut partial_message = String::new();
-    let peer_addr = stream.peer_addr()?; // Store the client's address for reference
+    let peer_addr = stream.peer_addr()?; // Store the client's address
 
     loop {
         let bytes_read = stream.read(&mut buffer)?;
@@ -56,7 +56,7 @@ fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_m
 
             // Check if the response is a FULLRESYNC message
             if response.starts_with("+FULLRESYNC") {
-                // Write the FULLRESYNC response first
+                // Send the FULLRESYNC response first
                 stream.write_all(response.as_bytes())?;
                 stream.flush()?;
 
@@ -68,10 +68,11 @@ fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_m
                 db_lock.slave_connections.push(Arc::new(Mutex::new(stream.try_clone()?)));
                 println!("Added new slave at {}", peer_addr);
             } else {
-                // Send the normal response to the client
+                // Send the normal response
                 stream.write_all(response.as_bytes())?;
-                
-                // Filter commands that should be forwarded to slaves
+                stream.flush()?;
+
+                // Ensure only data modification commands are forwarded to slaves
                 if should_forward_to_slaves(&partial_message) {
                     // Forward the command to all connected slaves
                     for slave_connection in &db_lock.slave_connections {
@@ -83,8 +84,8 @@ fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_m
                 }
             }
 
-            stream.flush()?;
-            partial_message.clear(); // Clear processed command
+            // Clear the partial message buffer
+            partial_message.clear();
         }
     }
 
@@ -93,7 +94,7 @@ fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_m
 
 // Helper function to filter commands that should be forwarded to slaves
 fn should_forward_to_slaves(command: &str) -> bool {
-    // Parse the command and check if it is a data-modifying command
+    // Define relevant commands that modify data and should be replicated
     let relevant_commands = vec!["SET", "DEL", "INCR", "DECR", "HMSET", "HSET", "LPUSH", "RPUSH", "SADD"];
     
     if let Some(cmd) = command.split_whitespace().next() {
