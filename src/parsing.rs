@@ -11,12 +11,6 @@ pub fn parse_redis_message(
     let mut lines = message.lines();
 
     if let Some(line) = lines.next() {
-        // Handle simple "+OK" status reply
-        if line == "+OK" {
-            println!("Received +OK status reply.");
-            return (Some("OK".to_string()), "+OK\r\n".to_string());
-        }
-        
         if line.starts_with('*') {
             let mut command = None;
             let mut args = Vec::new();

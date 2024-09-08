@@ -94,6 +94,7 @@ fn listen_for_master_commands(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabas
                 println!("RDB file received and processed.");
             }
         } else {
+            println!("Received command from master: {}", message);
             // Parse the Redis message and get the response for other commands
             let mut db_lock = db.lock().unwrap();
             let (command, response) = parse_redis_message(&message, &mut db_lock, config_map);
