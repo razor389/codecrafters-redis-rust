@@ -72,7 +72,9 @@ fn listen_for_master_commands(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabas
 
                 // Store master_replid and master_offset in your RedisDatabase replication state (lock briefly)
                 {
+                    println!("Storing master_replid and master_offset in the database.");
                     let mut db_lock = db.lock().unwrap();
+                    println!("Database lock acquired.");
                     db_lock.replication_info.insert("master_replid".to_string(), master_replid.to_string());
                     db_lock.replication_info.insert("master_repl_offset".to_string(), master_offset.to_string());
                 }
