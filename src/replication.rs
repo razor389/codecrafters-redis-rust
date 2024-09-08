@@ -158,16 +158,21 @@ fn listen_for_master_commands(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabas
 
 // Initializes replication settings, determining whether this server is a master or slave
 pub fn initialize_replication(config_map: &HashMap<String, String>, db: Arc<Mutex<RedisDatabase>>, port: &str) {
-    let mut db_lock = db.lock().unwrap();
-
+    // Acquire the lock only to update the replication info, then release it
     if let Some(replicaof) = config_map.get("replicaof") {
         let replicaof_parts: Vec<&str> = replicaof.split(' ').collect();
         let ip = replicaof_parts[0];
         let replica_port = replicaof_parts[1];
         let address = format!("{}:{}", ip, replica_port);
 
-        db_lock.replication_info.insert("role".to_string(), "slave".to_string());
+        {
+            // Lock the database to set replication info as "slave"
+            let mut db_lock = db.lock().unwrap();
+            db_lock.replication_info.insert("role".to_string(), "slave".to_string());
+            println!("Replication info updated to 'slave'.");
+        } // Lock is released here
 
+        // Connect to the master and initiate the replication handshake
         match TcpStream::connect(&address) {
             Ok(mut stream) => {
                 println!("Connected to master at {}", address);
@@ -189,9 +194,14 @@ pub fn initialize_replication(config_map: &HashMap<String, String>, db: Arc<Mute
             Err(e) => eprintln!("Failed to connect to master at {}: {}", address, e),
         }
     } else {
-        db_lock.replication_info.insert("role".to_string(), "master".to_string());
-        db_lock.replication_info.insert("master_replid".to_string(), "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string());
-        db_lock.replication_info.insert("master_repl_offset".to_string(), "0".to_string());
-        println!("Running as master.");
+        // If no replicaof is present, the server acts as a master
+        {
+            let mut db_lock = db.lock().unwrap();
+            db_lock.replication_info.insert("role".to_string(), "master".to_string());
+            db_lock.replication_info.insert("master_replid".to_string(), "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string());
+            db_lock.replication_info.insert("master_repl_offset".to_string(), "0".to_string());
+            println!("Running as master.");
+        } // Lock is released here
     }
 }
+
