@@ -60,17 +60,36 @@ fn listen_for_master_commands(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabas
         let message = String::from_utf8_lossy(&buffer[..bytes_read]);
         println!("Received message from master: {}", message);
 
-        // Parse the Redis message and get the response
-        let mut db_lock = db.lock().unwrap();
-        let (command, response) = parse_redis_message(&message, &mut db_lock, config_map);
+        // Check if we received an RDB bulk string
+        if message.starts_with("$") {
+            // Parse the bulk string length
+            if let Some((length, _)) = message[1..].split_once("\r\n") {
+                let length: usize = length.parse().unwrap();
+                println!("Expecting RDB file of length: {}", length);
 
-        // Log the command and response for debugging purposes
-        println!("Parsed command: {:?}, Response: {}", command, response);
+                // Read the complete RDB file
+                let mut rdb_data = vec![0u8; length];
+                stream.read_exact(&mut rdb_data)?;
 
-        // Only send responses back for certain commands (e.g., PSYNC), no "OK" for most
-        if let Some(cmd) = command {
-            if cmd == "PSYNC" {
-                stream.write_all(response.as_bytes())?;
+                // Process the RDB data (you can implement your own RDB parsing logic here)
+                println!("Received RDB file of size: {}", rdb_data.len());
+
+                // Acknowledge that we received the RDB file
+                println!("RDB file received and processed.");
+            }
+        } else {
+            // Parse the Redis message and get the response
+            let mut db_lock = db.lock().unwrap();
+            let (command, response) = parse_redis_message(&message, &mut db_lock, config_map);
+
+            // Log the command and response for debugging purposes
+            println!("Parsed command: {:?}, Response: {}", command, response);
+
+            // Only send responses back for certain commands (e.g., PSYNC), no "OK" for most
+            if let Some(cmd) = command {
+                if cmd == "PSYNC" {
+                    stream.write_all(response.as_bytes())?;
+                }
             }
         }
     }
