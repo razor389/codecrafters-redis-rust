@@ -84,7 +84,9 @@ fn listen_for_master_commands(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabas
         // Handle any subsequent commands sent by the master
         else {
             println!("Received command from master: {}", message);
-
+            if message == "+OK\r\n" {
+                continue;
+            } 
             // Parse the Redis message and get the response for commands like SET
             if let Ok(mut db_lock) = db.try_lock() {
                 let (command, response) = parse_redis_message(&message, &mut db_lock, config_map);
