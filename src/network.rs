@@ -44,7 +44,7 @@ fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_m
         let bytes_read = stream.read(&mut buffer)?;
 
         if bytes_read == 0 {
-            break;
+            break; // Connection closed by client
         }
 
         partial_message.push_str(&String::from_utf8_lossy(&buffer[..bytes_read]));
@@ -70,20 +70,18 @@ fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_m
             } else {
                 // Send the normal response
                 stream.write_all(response.as_bytes())?;
-                // Forward the command to all connected slaves (excluding the current client)
+                
+                // Forward the command to all connected slaves (including the current client if it's a slave)
                 for slave_connection in &db_lock.slave_connections {
                     let mut slave_stream = slave_connection.lock().unwrap();
-                    if !stream.peer_addr()?.eq(&slave_stream.peer_addr()?) {
-                        println!("Forwarding message to slave: {}", partial_message);
-                        slave_stream.write_all(partial_message.as_bytes())?;
-                        slave_stream.flush()?;
-                    }
+                    println!("Forwarding message to slave: {}", partial_message);
+                    slave_stream.write_all(partial_message.as_bytes())?;
+                    slave_stream.flush()?;
                 }
             }
 
-            
             stream.flush()?;
-            partial_message.clear();
+            partial_message.clear(); // Clear processed command
         }
     }
 
