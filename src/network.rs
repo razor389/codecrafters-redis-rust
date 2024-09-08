@@ -36,8 +36,9 @@ pub fn start_server(config_map: HashMap<String, String>, db: Arc<Mutex<RedisData
 
 // Handles a single client connection
 fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_map: &HashMap<String, String>) -> io::Result<()> {
-    let mut buffer = [0; 512];
+    let mut buffer = [0; 1024]; // Increased buffer size
     let mut partial_message = String::new();
+    let peer_addr = stream.peer_addr()?; // Store the client's address for reference
 
     loop {
         let bytes_read = stream.read(&mut buffer)?;
@@ -61,16 +62,22 @@ fn handle_client(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabase>>, config_m
 
                 // Send the RDB file in RESP bulk string format
                 send_rdb_file(stream)?;
-                println!("Sent RDB file to client");
+                println!("Sent RDB file to client after FULLRESYNC");
+
+                // Now add the slave connection to the master's list of slaves
+                db_lock.slave_connections.push(Arc::new(Mutex::new(stream.try_clone()?)));
+                println!("Added new slave at {}", peer_addr);
             } else {
                 // Send the normal response
                 stream.write_all(response.as_bytes())?;
-                // Forward the command to all connected slaves
+                // Forward the command to all connected slaves (excluding the current client)
                 for slave_connection in &db_lock.slave_connections {
                     let mut slave_stream = slave_connection.lock().unwrap();
-                    println!("Forwarding message to slave: {}", partial_message);
-                    slave_stream.write_all(partial_message.as_bytes())?;
-                    slave_stream.flush()?;
+                    if !stream.peer_addr()?.eq(&slave_stream.peer_addr()?) {
+                        println!("Forwarding message to slave: {}", partial_message);
+                        slave_stream.write_all(partial_message.as_bytes())?;
+                        slave_stream.flush()?;
+                    }
                 }
             }
 
