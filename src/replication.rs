@@ -70,28 +70,53 @@ fn listen_for_master_commands(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabas
 
                 println!("Received FULLRESYNC with replid: {} and offset: {}", master_replid, master_offset);
 
-                // You can store master_replid and master_offset in your RedisDatabase replication state
-                let mut db_lock = db.lock().unwrap();
-                db_lock.replication_info.insert("master_replid".to_string(), master_replid.to_string());
-                db_lock.replication_info.insert("master_repl_offset".to_string(), master_offset.to_string());
+                // Store master_replid and master_offset in your RedisDatabase replication state (lock briefly)
+                {
+                    let mut db_lock = db.lock().unwrap();
+                    db_lock.replication_info.insert("master_replid".to_string(), master_replid.to_string());
+                    db_lock.replication_info.insert("master_repl_offset".to_string(), master_offset.to_string());
+                }
+
+                // After FULLRESYNC, we expect an RDB file as a bulk string
+                println!("Waiting for the RDB file...");
             }
         }
         // Handle the bulk string for the RDB file transfer
         else if message.starts_with("$") {
             // Parse the bulk string length (the RDB file length)
-            if let Some((length, _)) = message[1..].split_once("\r\n") {
-                let length: usize = length.parse().unwrap();
+            if let Some((length_str, _)) = message[1..].split_once("\r\n") {
+                let length: usize = length_str.parse().unwrap();
                 println!("Expecting RDB file of length: {}", length);
 
-                // Read the complete RDB file
+                // Allocate a buffer for the RDB file
                 let mut rdb_data = vec![0u8; length];
-                stream.read_exact(&mut rdb_data)?;
 
-                // Process the RDB data (you can implement your own RDB parsing logic here)
-                println!("Received RDB file of size: {}", rdb_data.len());
+                // Read the complete RDB file, retrying if needed until all bytes are received
+                let mut bytes_read = 0;
+                while bytes_read < length {
+                    let read = stream.read(&mut rdb_data[bytes_read..])?;
+                    if read == 0 {
+                        println!("Connection closed before receiving the full RDB file.");
+                        break;
+                    }
+                    bytes_read += read;
+                    println!("Read {}/{} bytes of RDB file.", bytes_read, length);
+                }
 
-                // Acknowledge that we received the RDB file
-                println!("RDB file received and processed.");
+                // Ensure we received the complete RDB file
+                if bytes_read == length {
+                    println!("Successfully received the full RDB file.");
+
+                    // Lock database and store/process the RDB data
+                    {
+                        let mut db_lock = db.lock().unwrap();
+                        db_lock.load_rdb_data(rdb_data);
+                    }
+
+                    println!("RDB file received and processed.");
+                } else {
+                    println!("Failed to receive the full RDB file. Expected {} bytes, but got {} bytes.", length, bytes_read);
+                }
             }
         } else {
             println!("Received command from master: {}", message);
