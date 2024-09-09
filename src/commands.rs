@@ -171,9 +171,9 @@ pub fn process_commands_after_rdb(
         // Remove the processed part from the partial message
         partial_message.drain(..consumed_length);
         println!("partial_message after drain: {}", partial_message);
-        println!("command message length bytes: {}", command_msg_length_bytes);
-
+        
         if let Some(cmd) = command {
+            println!("command message length bytes: {}", command_msg_length_bytes);
             match cmd.as_str() {
                 "SET" => {
                     if args.len() >= 2 {
