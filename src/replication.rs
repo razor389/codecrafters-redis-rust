@@ -68,6 +68,7 @@ pub async fn listen_for_master_commands(
 
         // Handle FULLRESYNC and RDB file
         if !expecting_rdb && partial_message.starts_with("+FULLRESYNC") {
+            println!("Received FULLRESYNC from master.");
             if let Some(length) = parse_bulk_length(&partial_message) {
                 rdb_bulk_len = length;
                 expecting_rdb = true;
