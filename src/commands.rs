@@ -1,7 +1,9 @@
 use crate::database::{RedisDatabase, RedisValue};
 use std::collections::HashMap;
-use tokio::{io::AsyncWriteExt, net::TcpStream};
+use std::io::{self, Write};
+use std::net::TcpStream;
 
+// Handle the SET command
 pub fn handle_set(db: &mut RedisDatabase, args: &[String]) -> String {
     if args.len() == 2 {
         db.insert(args[0].clone(), RedisValue::new(args[1].clone(), None));
@@ -15,6 +17,7 @@ pub fn handle_set(db: &mut RedisDatabase, args: &[String]) -> String {
     }
 }
 
+// Handle the GET command
 pub fn handle_get(db: &mut RedisDatabase, args: &[String]) -> String {
     if let Some(redis_value) = db.get(&args[0]) {
         if redis_value.is_expired() {
@@ -28,6 +31,7 @@ pub fn handle_get(db: &mut RedisDatabase, args: &[String]) -> String {
     }
 }
 
+// Handle the KEYS command
 pub fn handle_keys(db: &RedisDatabase) -> String {
     let keys: Vec<&String> = db.data.keys().collect();
     let mut response = format!("*{}\r\n", keys.len());
@@ -37,6 +41,7 @@ pub fn handle_keys(db: &RedisDatabase) -> String {
     response
 }
 
+// Handle the CONFIG command
 pub fn handle_config(config_map: &HashMap<String, String>, args: &[String]) -> String {
     if args.len() == 2 && args[0].to_uppercase() == "GET" {
         if let Some(value) = config_map.get(&args[1]) {
@@ -49,6 +54,7 @@ pub fn handle_config(config_map: &HashMap<String, String>, args: &[String]) -> S
     }
 }
 
+// Handle the ECHO command
 pub fn handle_echo(args: &[String]) -> String {
     if args.len() == 1 {
         format!("${}\r\n{}\r\n", args[0].len(), args[0])
@@ -57,6 +63,7 @@ pub fn handle_echo(args: &[String]) -> String {
     }
 }
 
+// Handle the PING command
 pub fn handle_ping(args: &[String]) -> String {
     if args.is_empty() {
         "+PONG\r\n".to_string()
@@ -67,6 +74,7 @@ pub fn handle_ping(args: &[String]) -> String {
     }
 }
 
+// Handle the INFO REPLICATION command
 pub fn handle_info(db: &RedisDatabase, args: &[String]) -> String {
     if args.len() == 1 && args[0].to_uppercase() == "REPLICATION" {
         let mut response = String::new();
@@ -79,18 +87,18 @@ pub fn handle_info(db: &RedisDatabase, args: &[String]) -> String {
     }
 }
 
+// Handle the REPLCONF command
 pub fn handle_replconf(_args: &[String]) -> String {
     "+OK\r\n".to_string()  
 }
 
+// Handle the PSYNC command
 pub fn handle_psync(db: &RedisDatabase, args: &[String]) -> String {
     if args.len() == 2 {
         if let Some(master_replid) = db.replication_info.get("master_replid") {
             if let Some(master_repl_offset) = db.replication_info.get("master_repl_offset") {
                 // Prepare FULLRESYNC response
                 let response = format!("+FULLRESYNC {} {}\r\n", master_replid, master_repl_offset);
-                
-                // Send only the response part for now
                 return response;
             } else {
                 return "-ERR master_repl_offset not found\r\n".to_string();
@@ -103,8 +111,8 @@ pub fn handle_psync(db: &RedisDatabase, args: &[String]) -> String {
     }
 }
 
-// Function to send the binary RDB file in RESP bulk string format asynchronously
-pub async fn send_rdb_file(stream: &mut TcpStream) -> std::io::Result<()> {
+// Function to send the binary RDB file in RESP bulk string format synchronously
+pub fn send_rdb_file(stream: &mut TcpStream) -> io::Result<()> {
     // Hex representation of the empty RDB file
     let hex_rdb = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
 
@@ -115,10 +123,10 @@ pub async fn send_rdb_file(stream: &mut TcpStream) -> std::io::Result<()> {
     let length_header = format!("${}\r\n", binary_data.len());
     
     // Send the length header first
-    stream.write_all(length_header.as_bytes()).await?;
+    stream.write_all(length_header.as_bytes())?;
 
     // Send the raw binary data
-    stream.write_all(&binary_data).await?;
+    stream.write_all(&binary_data)?;
 
     Ok(())
 }

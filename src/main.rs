@@ -1,7 +1,5 @@
-use std::{env, collections::HashMap, path::Path};
-use std::sync::Arc;
-use tokio::sync::Mutex as AsyncMutex;
-use tokio::task;
+use std::{env, collections::HashMap, path::Path, sync::{Arc, Mutex}};
+use std::thread;
 
 mod replication;
 mod network;
@@ -15,11 +13,8 @@ use network::start_server;
 use database::RedisDatabase;
 use rdb_parser::parse_rdb_file;
 
-// Function to initialize the Redis database, including loading from RDB file if available
 fn initialize_database(config_map: &HashMap<String, String>) -> RedisDatabase {
     let mut db = RedisDatabase::new();
-
-    // Check for RDB file loading
     if let Some(dir) = config_map.get("dir") {
         if let Some(dbfilename) = config_map.get("dbfilename") {
             let rdb_path = Path::new(dir).join(dbfilename);
@@ -28,21 +23,17 @@ fn initialize_database(config_map: &HashMap<String, String>) -> RedisDatabase {
             }
         }
     }
-
     println!("Database data: {:?}", db.data);
     db
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let args: Vec<String> = env::args().collect();
     let mut config_map = HashMap::new();
-
-    // Parse command-line arguments into config_map
+    
     let mut i = 1;
     while i < args.len() {
         let key = &args[i];
-
         if key.starts_with("--") {
             if i + 1 < args.len() {
                 let value = args[i + 1].clone();
@@ -60,28 +51,28 @@ async fn main() {
     }
 
     let default_port = "6379".to_string();
-    let port = config_map.get("port").unwrap_or(&default_port).to_string(); // Capture port
+    let port = config_map.get("port").unwrap_or(&default_port).to_string();
 
     println!("Starting server with config: {:?}", config_map);
 
-    // Initialize the database
-    let db = Arc::new(AsyncMutex::new(initialize_database(&config_map)));
-
-    // Start the server and replication concurrently
+    let db = Arc::new(Mutex::new(initialize_database(&config_map)));
+    
     let server_db = Arc::clone(&db);
     let server_config = config_map.clone();
-    let server_task = task::spawn(async move {
-        if let Err(e) = start_server(server_config, server_db).await {
+    
+    let server_thread = thread::spawn(move || {
+        if let Err(e) = start_server(server_config, server_db) {
             eprintln!("Server failed: {}", e);
         }
     });
 
     let replication_db = Arc::clone(&db);
     let replication_config = config_map.clone();
-    let replication_task = task::spawn(async move {
-        initialize_replication(&replication_config, replication_db, &port).await;
+    
+    let replication_thread = thread::spawn(move || {
+        initialize_replication(&replication_config, replication_db, &port);
     });
 
-    // Wait for both the server and replication to finish
-    let _ = tokio::try_join!(server_task, replication_task);
+    let _ = server_thread.join();
+    let _ = replication_thread.join();
 }

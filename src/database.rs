@@ -1,9 +1,7 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::net::TcpStream;
-use tokio::sync::Mutex;
-
+use std::net::TcpStream;
 pub struct RedisDatabase {
     pub data: HashMap<String, RedisValue>,
     pub replication_info: HashMap<String, String>,
