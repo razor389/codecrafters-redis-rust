@@ -66,7 +66,7 @@ pub async fn listen_for_master_commands(
         let message = String::from_utf8_lossy(&buffer[..bytes_read]);
         partial_message.push_str(&message);
 
-        // Check if we are expecting an RDB file (bulk string)
+        // Handle FULLRESYNC and RDB file
         if !expecting_rdb && partial_message.starts_with("+FULLRESYNC") {
             if let Some(length) = parse_bulk_length(&partial_message) {
                 rdb_bulk_len = length;
@@ -95,19 +95,22 @@ pub async fn listen_for_master_commands(
             partial_message.clear(); // Clear after handling the +OK
         }
 
-        // Handle remaining Redis commands (SET, GET, etc.) after RDB file
-        else if partial_message.contains("\r\n") {
+        // Handle and process individual Redis commands
+        while let Some(position) = partial_message.find("\r\n") {
+            // Extract one complete command from partial_message
+            let command = partial_message[..position + 2].to_string(); // Create a copy of the command
+            partial_message = partial_message[position + 2..].to_string(); // Reassign the remaining part
+
             // If we have a complete Redis command, parse it
             if let Ok(mut db_lock) = db.try_lock() {
-                let (command, args, _response) = parse_redis_message(&partial_message, &mut db_lock, config_map);
+                let (command, args, _) = parse_redis_message(&command, &mut db_lock, config_map);
 
                 // Log the command and response for debugging purposes
                 println!("Parsed command: {:?}, Args: {:?}", command, args);
 
                 // Apply SET command to the slave's local database
                 if let Some(cmd) = command {
-                    if cmd == "SET" && args.len() >= 2 {
-                        println!("Applying SET command from master: {} = {}", args[0], args[1]);
+                    if cmd == "SET" && args.len() == 2 {
                         let key = args[0].clone();  // Access key
                         let value = args[1].clone();  // Access value
                         db_lock.insert(key, RedisValue::new(value, None));  // Insert into database
@@ -117,9 +120,6 @@ pub async fn listen_for_master_commands(
             } else {
                 eprintln!("Failed to acquire lock for command processing.");
             }
-
-            // Clear the partial message buffer after processing the command
-            partial_message.clear();
         }
     }
 
