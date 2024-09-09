@@ -1,4 +1,3 @@
-// src/parsing.rs
 use crate::database::RedisDatabase;
 use crate::commands::{handle_set, handle_get, handle_config, handle_keys, handle_echo, handle_ping, handle_info, handle_replconf, handle_psync};
 use std::collections::HashMap;
@@ -7,12 +6,14 @@ pub fn parse_redis_message(
     message: &str,
     db: &mut RedisDatabase,
     config_map: &HashMap<String, String>,
-) -> Vec<(Option<String>, Vec<String>, String, usize)> {
+) -> Vec<(Option<String>, Vec<String>, String, usize, usize)> {
     let mut results = Vec::new();
     let mut cursor = 0;
     let bytes = message.as_bytes();
 
     while cursor < bytes.len() {
+        let initial_cursor = cursor; // Track where this message started
+
         // Check for argument count prefix *
         if bytes[cursor] == b'*' {
             cursor += 1; // Move past '*'
@@ -21,7 +22,7 @@ pub fn parse_redis_message(
             let end = match find_crlf(&bytes[cursor..]) {
                 Some(e) => e,
                 None => {
-                    results.push((None, vec![], "-ERR incomplete message\r\n".to_string(), cursor));
+                    results.push((None, vec![], "-ERR incomplete message\r\n".to_string(), cursor, 0));
                     break;
                 }
             };
@@ -32,7 +33,7 @@ pub fn parse_redis_message(
             {
                 Some(count) => count,
                 None => {
-                    results.push((None, vec![], "-ERR invalid argument count\r\n".to_string(), cursor));
+                    results.push((None, vec![], "-ERR invalid argument count\r\n".to_string(), cursor, 0));
                     break;
                 }
             };
@@ -51,7 +52,7 @@ pub fn parse_redis_message(
                     let end = match find_crlf(&bytes[cursor..]) {
                         Some(e) => e,
                         None => {
-                            results.push((None, vec![], "-ERR incomplete message\r\n".to_string(), cursor));
+                            results.push((None, vec![], "-ERR incomplete message\r\n".to_string(), cursor, 0));
                             break;
                         }
                     };
@@ -62,7 +63,7 @@ pub fn parse_redis_message(
                     {
                         Some(len) => len,
                         None => {
-                            results.push((None, vec![], "-ERR invalid bulk string length\r\n".to_string(), cursor));
+                            results.push((None, vec![], "-ERR invalid bulk string length\r\n".to_string(), cursor, 0));
                             break;
                         }
                     };
@@ -79,11 +80,11 @@ pub fn parse_redis_message(
                             args.push(bulk_string.to_string());
                         }
                     } else {
-                        results.push((None, vec![], "-ERR incomplete bulk string\r\n".to_string(), cursor));
+                        results.push((None, vec![], "-ERR incomplete bulk string\r\n".to_string(), cursor, 0));
                         break;
                     }
                 } else {
-                    results.push((None, vec![], "-ERR expected bulk string\r\n".to_string(), cursor));
+                    results.push((None, vec![], "-ERR expected bulk string\r\n".to_string(), cursor, 0));
                     break;
                 }
             }
@@ -102,10 +103,13 @@ pub fn parse_redis_message(
                 _ => "-ERR unknown command\r\n".to_string(),
             };
 
-            // Push the result (command, args, response, cursor)
-            results.push((command, args, response, cursor));
+            // Calculate the byte length of the entire command
+            let byte_length = cursor - initial_cursor;
+
+            // Push the result (command, args, response, cursor, byte_length)
+            results.push((command, args, response, cursor, byte_length));
         } else {
-            results.push((None, vec![], "-ERR invalid format\r\n".to_string(), cursor));
+            results.push((None, vec![], "-ERR invalid format\r\n".to_string(), cursor, 0));
             break;
         }
     }

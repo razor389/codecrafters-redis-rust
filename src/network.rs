@@ -70,7 +70,7 @@ fn handle_client(
                 parse_redis_message(&current_message, &mut db_lock, config_map)
             };
 
-            for (command, _args, response, _) in parsed_results {
+            for (command, _args, response,_,_) in parsed_results {
                 if response.starts_with("+FULLRESYNC") {
                     // Send the FULLRESYNC response
                     stream.write_all(response.as_bytes())?;
