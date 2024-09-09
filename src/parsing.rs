@@ -7,40 +7,44 @@ pub fn parse_redis_message(
     message: &str,
     db: &mut RedisDatabase,
     config_map: &HashMap<String, String>,
-) -> (Option<String>, Vec<String>, String) {  // Return command, args, and response
+) -> (Option<String>, Vec<String>, String) {
     let mut lines = message.lines();
+    let mut command = None;
+    let mut args = Vec::new();
+    let mut arg_count = 0;
 
     if let Some(line) = lines.next() {
         if line.starts_with('*') {
-            let mut command = None;
-            let mut args = Vec::new();
-            let mut arg_count = 0;
-
-            // Parse the number of arguments
+            // Parse the argument count
             if let Ok(count) = line[1..].parse::<usize>() {
                 arg_count = count;
+            } else {
+                return (None, vec![], "-ERR invalid argument count\r\n".to_string());
             }
 
+            // Parse the bulk strings (arguments) in RESP format
             while let Some(line) = lines.next() {
                 if line.starts_with('$') {
-                    // The next line contains the argument value
+                    // Expecting a bulk string length, skip over it to the next line
                     if let Some(arg) = lines.next() {
                         if command.is_none() {
-                            command = Some(arg.to_uppercase()); // Command should be the first argument
+                            // First argument is the command
+                            command = Some(arg.to_uppercase());
                         } else {
-                            args.push(arg.to_string()); // Add subsequent arguments to args
+                            // Subsequent arguments
+                            args.push(arg.to_string());
                         }
                     }
                 }
             }
 
-            // Debugging output for parsed command and arguments
-            println!("Parsed command: {:?}, Args: {:?}", command, args);
-
-            // Ensure the number of collected args matches the declared arg count
+            // Ensure the number of arguments matches the declared count
             if args.len() + 1 != arg_count {
                 return (command, args, "-ERR argument count mismatch\r\n".to_string());
             }
+
+            // Debug output for parsed command and arguments
+            println!("Parsed command: {:?}, Args: {:?}", command, args);
 
             // Match the command with appropriate handler
             let response = match command.as_deref() {
@@ -56,7 +60,7 @@ pub fn parse_redis_message(
                 _ => "-ERR unknown command\r\n".to_string(),
             };
 
-            return (command, args, response);  // Return command, args, and response
+            return (command, args, response);  // Return parsed command, args, and response
         } else {
             return (None, vec![], "-ERR invalid format\r\n".to_string());
         }
