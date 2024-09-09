@@ -119,7 +119,7 @@ pub fn parse_redis_message(
                 ReplicationInfoValue::CommandBytes(cmd_bytes),
             );
 
-            println!("Updated bytes_processed to: {}", cmd_bytes);
+            //println!("Updated bytes_processed to: {}", cmd_bytes);
 
             // Push the result (command, args, response, cursor, byte_length)
             results.push((command, args, response, cursor, byte_length));
