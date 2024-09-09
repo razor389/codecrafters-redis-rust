@@ -68,5 +68,5 @@ fn main() {
     initialize_replication(&config_map, db.clone(), &port);
 
     // Start the server to handle client connections
-    start_server(config_map, db).unwrap();
+    start_server(config_map, db.clone()).unwrap();
 }
