@@ -78,7 +78,7 @@ pub fn listen_for_master_commands(
                     let mut db_lock = db.lock().unwrap();
                     db_lock.replication_info.insert("master_replid".to_string(), ReplicationInfoValue::StringValue(replid.clone()));
                     db_lock.replication_info.insert("master_repl_offset".to_string(), ReplicationInfoValue::StringValue(offset.clone()));
-                    println!("Handled FULLRESYNC: replid = {}, offset = {}", replid, offset);
+                    //println!("Handled FULLRESYNC: replid = {}, offset = {}", replid, offset);
                     partial_message.drain(..fullresync_end + 2);
                 }
             }
@@ -87,7 +87,7 @@ pub fn listen_for_master_commands(
         // Handle RDB file parsing (bulk string)
         if !received_rdb && partial_message.starts_with(b"$") {
             if let Some(bulk_length) = parse_bulk_length(&partial_message) {
-                println!("bulk length: {}", bulk_length);
+                //println!("bulk length: {}", bulk_length);
 
                 let header_size = partial_message.windows(2).position(|w| w == b"\r\n").unwrap() + 2;
 
@@ -101,8 +101,8 @@ pub fn listen_for_master_commands(
                 while partial_message.len() < remaining_bulk_bytes {
                     let bytes_read = stream.read(&mut buffer)?;
                     if bytes_read == 0 {
-                        println!("no bytes read from master, continuing.");
-                        continue;
+                        println!("no bytes read from master when waiting orn RDB file. breaking.");
+                        break;
                     }
                     partial_message.extend_from_slice(&buffer[..bytes_read]);
                 }

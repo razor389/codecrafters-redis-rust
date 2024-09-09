@@ -8,7 +8,7 @@ use std::fmt;
 #[derive(Debug)]
 pub enum ReplicationInfoValue {
     StringValue(String),
-    CommandBytes(u32), // Number of bytes worth of commands processed
+    CommandBytes(usize), // Number of bytes worth of commands processed
 }
 
 // Implement the Display trait for ReplicationInfoValue

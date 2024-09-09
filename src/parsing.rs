@@ -98,7 +98,7 @@ pub fn parse_redis_message(
                 Some("ECHO") => handle_echo(&args),
                 Some("PING") => handle_ping(&args),
                 Some("INFO") => handle_info(db, &args),
-                Some("REPLCONF") => handle_replconf(&args),
+                Some("REPLCONF") => handle_replconf(db,&args),
                 Some("PSYNC") => handle_psync(db, &args),
                 _ => "-ERR unknown command\r\n".to_string(),
             };

@@ -1,4 +1,4 @@
-use crate::database::{RedisDatabase, RedisValue};
+use crate::database::{RedisDatabase, RedisValue, ReplicationInfoValue};
 use crate::parsing::parse_redis_message;
 use std::collections::HashMap;
 use std::io::{self, Write};
@@ -89,9 +89,9 @@ pub fn handle_info(db: &RedisDatabase, args: &[String]) -> String {
     }
 }
 
+
 // Handle the REPLCONF command
-// Handle the REPLCONF command
-pub fn handle_replconf(args: &[String]) -> String {
+pub fn handle_replconf(db: &RedisDatabase, args: &[String]) -> String {
     if args.len() == 2 && args[0].to_uppercase() == "GETACK" && args[1] == "*" {
         // If the command is "REPLCONF GETACK *", respond with "REPLCONF ACK 0"
         "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n".to_string()
@@ -163,9 +163,11 @@ pub fn process_commands_after_rdb(
 ) -> io::Result<()> {
     let mut db_lock = db.lock().unwrap();
     println!("processing message: {}", partial_message);
+
     // Parse the Redis message and handle the parsed commands
     let parsed_results = parse_redis_message(&partial_message, &mut db_lock, config_map);
     println!("parsed results: {:?}", parsed_results);
+
     for (command, args, response, _cursor, command_msg_length_bytes) in parsed_results {
         // Ensure we are draining the string based on bytes
         let partial_message_bytes = partial_message.as_bytes();
@@ -208,8 +210,25 @@ pub fn process_commands_after_rdb(
                 },
                 _ => println!("Unknown command: {}", cmd),
             }
+
+            // Update replication info for the number of bytes processed
+            let cmd_bytes = match db_lock.get_replication_info("bytes_processed") {
+                Some(ReplicationInfoValue::CommandBytes(current_bytes)) => {
+                    current_bytes + command_msg_length_bytes
+                }
+                _ => command_msg_length_bytes,  // Initialize if not present
+            };
+
+            // Update the replication info in the database
+            db_lock.update_replication_info(
+                "bytes_processed".to_string(),
+                ReplicationInfoValue::CommandBytes(cmd_bytes),
+            );
+
+            println!("Updated bytes_processed to: {}", cmd_bytes);
         }
     }
 
     Ok(())
 }
+
