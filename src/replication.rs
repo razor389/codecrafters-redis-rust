@@ -80,7 +80,7 @@ pub fn listen_for_master_commands(
         // Handle RDB file parsing
         if partial_message.starts_with('$') && !received_rdb {
             if let Some(bulk_length) = parse_bulk_length(&partial_message) {
-                println!("got here");
+                println!("bulk length: {}", bulk_length);
                 // Remove the bulk string header ($<length>\r\n)
                 let header_size = partial_message.find("\r\n").unwrap() + 2; // +2 for \r\n
                 partial_message.drain(..header_size);
