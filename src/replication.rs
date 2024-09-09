@@ -85,6 +85,7 @@ pub async fn listen_for_master_commands(
 
         // Handle RDB file parsing
         if partial_message.starts_with('$') && !expecting_rdb {
+            println!("Received bulk length header: {}", partial_message);
             if let Some(length) = parse_bulk_length(&partial_message) {
                 rdb_bulk_len = length;
                 expecting_rdb = true;
