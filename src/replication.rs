@@ -116,18 +116,6 @@ pub fn listen_for_master_commands(
             }
         }
 
-        // If there are remaining bulk bytes, wait for more data
-        if remaining_bulk_bytes > 0 {
-            if partial_message.len() >= remaining_bulk_bytes {
-                partial_message.drain(..remaining_bulk_bytes);
-                remaining_bulk_bytes = 0;
-                received_rdb = true;
-                println!("Remaining RDB bytes fully received.");
-            } else {
-                continue;
-            }
-        }
-
         // Process Redis commands after RDB has been received
         if received_rdb {
             if let Ok(partial_str) = std::str::from_utf8(&partial_message) {
