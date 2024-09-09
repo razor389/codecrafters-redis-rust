@@ -120,21 +120,33 @@ pub fn handle_wait(db: &RedisDatabase, args: &[String]) -> String {
             _ => return "-ERR master replication offset not found or invalid\r\n".to_string(),
         };
 
+        // Debug: Print the master offset
+        println!("Master replication offset: {}", master_repl_offset);
+
         // Count how many slaves have matched the master_repl_offset
         let matching_slaves = db
             .slave_connections
             .iter()
             .filter(|slave_connection| {
-                // Simulate fetching the slave ID and its replication offset
-                let slave_id = format!("slave_repl_offset_{}", slave_connection.lock().unwrap().peer_addr().unwrap());
+                let slave_connection = slave_connection.lock().unwrap();
+                let slave_id = format!("slave_repl_offset_{}", slave_connection.peer_addr().unwrap());
 
                 // Get the slave's replication offset from replication_info
                 if let Some(ReplicationInfoValue::ByteValue(slave_offset)) = db.get_replication_info(&slave_id) {
+                    // Debug: Print the slave offset and comparison
+                    println!("Slave {} replication offset: {}", slave_connection.peer_addr().unwrap(), slave_offset);
+                    println!("Comparing slave offset ({}) with master offset ({})", slave_offset, master_repl_offset);
+
                     return *slave_offset >= master_repl_offset;
+                } else {
+                    println!("No replication info found for slave {}", slave_connection.peer_addr().unwrap());
                 }
                 false
             })
             .count();
+
+        // Debug: Print the number of matching slaves
+        println!("Matching slaves: {}", matching_slaves);
 
         // If we have enough matching slaves, return the count
         if matching_slaves >= num_slaves_to_wait_for {
@@ -146,11 +158,8 @@ pub fn handle_wait(db: &RedisDatabase, args: &[String]) -> String {
             // Return the number of slaves that matched before the timeout
             return format!(":{}\r\n", matching_slaves);
         }
-
     }
 }
-
-
 // Handle the REPLCONF command
 pub fn handle_replconf(db: &RedisDatabase, args: &[String]) -> String {
     if args.len() == 2 && args[0].to_uppercase() == "GETACK" && args[1] == "*" {
