@@ -100,6 +100,15 @@ pub async fn listen_for_master_commands(
             }
         }
 
+         // Handle "+OK\r\n" to send the PSYNC command
+         else if partial_message == "+OK\r\n" {
+            println!("Received +OK from master. Sending PSYNC command...");
+            stream
+                .write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n")
+                .await?;
+            partial_message.clear(); // Clear after handling the +OK
+        }
+
         // Now handle Redis commands after the RDB file
         while let Some(position) = partial_message.find("\r\n") {
             // Extract one complete command from partial_message
