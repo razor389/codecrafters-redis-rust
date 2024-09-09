@@ -96,49 +96,51 @@ fn handle_client(
                         if should_forward_to_slaves(&cmd) {
                             // Calculate the length of the current message in bytes
                             let bytes_sent = current_message.as_bytes().len();
-
+                    
                             // Lock the database and clone the slave connections
                             let slaves = {
                                 let db_lock = db.lock().unwrap();
                                 db_lock.slave_connections.clone()
                             };
-
+                    
                             // Forward the message to each slave
-                            for slave_connection in slaves {
+                            for slave_connection in slaves.iter() {
                                 let mut slave_stream = slave_connection.lock().unwrap();
                                 println!("Forwarding message to slave: {}", current_message);
                                 
-                                // Write the message to the slave's stream
+                                // Write the original command to the slave's stream
                                 slave_stream.write_all(current_message.as_bytes())?;
                                 slave_stream.flush()?;
+                    
+                                // After forwarding, send the REPLCONF GETACK * command
+                                let replconf_getack_message = "*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n";
+                                println!("Sending REPLCONF GETACK * to slave");
+                                slave_stream.write_all(replconf_getack_message.as_bytes())?;
+                                slave_stream.flush()?;
                             }
-
+                    
                             // Increment the master_repl_offset only once for the total bytes sent
                             let mut db_lock = db.lock().unwrap();
                             // Increment the master_repl_offset in replication_info
-                            if let Some(ReplicationInfoValue::StringValue(offset_str)) = db_lock.replication_info.get("master_repl_offset") {
-                                // Parse the current offset from the string
-                                if let Ok(current_offset) = offset_str.parse::<usize>() {
-                                    // Increment the offset by the number of bytes sent
-                                    let new_offset = current_offset + bytes_sent as usize;
-
-                                    // Update the replication_info with the new offset as a string
-                                    db_lock.replication_info.insert(
-                                        "master_repl_offset".to_string(),
-                                        ReplicationInfoValue::ByteValue(new_offset)
-                                    );
-                                }
+                            if let Some(ReplicationInfoValue::ByteValue(current_offset)) = db_lock.replication_info.get("master_repl_offset") {
+                                // Increment the offset by the number of bytes sent
+                                let new_offset = current_offset + bytes_sent;
+                    
+                                // Update the replication_info with the new offset as a ByteValue
+                                db_lock.replication_info.insert(
+                                    "master_repl_offset".to_string(),
+                                    ReplicationInfoValue::ByteValue(new_offset)
+                                );
                             } else {
-                                // If the master_repl_offset does not exist or is not a StringValue, initialize it
+                                // If the master_repl_offset does not exist, initialize it with the current bytes sent
                                 db_lock.replication_info.insert(
                                     "master_repl_offset".to_string(),
                                     ReplicationInfoValue::ByteValue(bytes_sent)
                                 );
                             }
-
                         }
                     }
-
+                    
                 }
             }
 
