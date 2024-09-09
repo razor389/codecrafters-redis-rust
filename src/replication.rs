@@ -81,19 +81,7 @@ fn listen_for_master_commands(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabas
         }
         // Handle RDB file as a bulk string (starts with $)
         else if message.starts_with('$') {
-            if let Some((length_str, _)) = message[1..].split_once("\r\n") {
-                let length: usize = length_str.parse().unwrap();
-                println!("Expecting RDB file of length: {}", length);
-
-                // Read the entire RDB file
-                let mut rdb_data = vec![0u8; length];
-                stream.read_exact(&mut rdb_data)?;
-
-                // Process RDB data (you can implement your own logic here)
-                println!("Received RDB file of size: {}", rdb_data.len());
-
-                println!("RDB file received and processed.");
-            }
+            continue; // Ignore the RDB file for now
         }
         // Handle Redis commands after the RDB is processed
         else {
