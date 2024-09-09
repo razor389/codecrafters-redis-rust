@@ -91,14 +91,18 @@ pub fn listen_for_master_commands(
                 // Spin until the entire bulk string (RDB file) is received
                 while partial_message.len() < remaining_bulk_bytes {
                     println!("spinning here");
+                
                     // Read more data from the stream until we have enough to process the entire RDB file
                     let bytes_read = stream.read(&mut buffer)?;
                     if bytes_read == 0 {
                         println!("no bytes read from master, continuing.");
                         continue;
                     }
-                    let additional_message = String::from_utf8_lossy(&buffer[..bytes_read]);
-                    partial_message.push_str(&additional_message);
+                
+                    // Convert bytes to UTF-8 and append to the string
+                    partial_message.push_str(&String::from_utf8_lossy(&buffer[..bytes_read]));
+                    
+                    // Now partial_message.len() is still in bytes because Rust strings track byte length
                 }
 
                 // Now drain the entire bulk string corresponding to the RDB file
@@ -108,6 +112,7 @@ pub fn listen_for_master_commands(
                     received_rdb = true;
                     println!("RDB file fully received and processed.");
                     println!("remaining message: {}", partial_message);
+                    println!("remaining message bytes: ")
                 }
             }
         }
