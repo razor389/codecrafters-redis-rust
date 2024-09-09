@@ -79,6 +79,7 @@ pub async fn listen_for_master_commands(
                 db_lock.replication_info.insert("master_replid".to_string(), replid.clone());
                 db_lock.replication_info.insert("master_repl_offset".to_string(), offset.clone());
                 println!("Handled FULLRESYNC: replid = {}, offset = {}", replid, offset);
+                println!("partial message: {:?}", partial_message);
                 partial_message.clear();  // Clear just the FULLRESYNC part
             }
         }
