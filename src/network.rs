@@ -65,7 +65,7 @@ async fn handle_client(
             let current_message = partial_message[..message_end].to_string(); // Extract the complete message
             println!("Received complete Redis message: {}", current_message);
 
-            let (command, _, response, _) = {
+            let (command, args, response, _) = {
                 // Acquire lock briefly for database operations
                 let mut db_lock = db.lock().await;
                 parse_redis_message(&current_message, &mut db_lock, config_map)
@@ -76,6 +76,23 @@ async fn handle_client(
                 // Write the response to the client
                 locked_stream.write_all(response.as_bytes()).await?;
                 locked_stream.flush().await?;
+            }
+
+            // Forward the command to all connected slaves if applicable
+            if let Some(cmd) = command {
+                if should_forward_to_slaves(&cmd) {
+                    let slaves = {
+                        // Acquire lock briefly to get slave connections
+                        let db_lock = db.lock().await;
+                        db_lock.slave_connections.clone()
+                    };
+                    for slave_connection in slaves {
+                        let mut slave_stream = slave_connection.lock().await;
+                        println!("Forwarding message to slave: {}", current_message);
+                        slave_stream.write_all(current_message.as_bytes()).await?;
+                        slave_stream.flush().await?;
+                    }
+                }
             }
 
             // Remove the processed message from the partial buffer
