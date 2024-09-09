@@ -129,12 +129,9 @@ async fn process_complete_redis_message(
     let mut db_lock = db.lock().await;
 
     // Parse the Redis message, return the command, args, response, and how much was consumed
-    if let (command, args, response, consumed_length) = parse_redis_message(partial_message, &mut db_lock, config_map) {
-        // Return the parsed command, arguments, response, and the length of the consumed message
-        return Some((command, args, response, consumed_length));
-    }
-
-    None
+    let (command, args, response, consumed_length) = parse_redis_message(partial_message, &mut db_lock, config_map);
+    // Return the parsed command, arguments, response, and the length of the consumed message
+    return Some((command, args, response, consumed_length));
 }
 
 
