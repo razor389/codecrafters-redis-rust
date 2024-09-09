@@ -120,7 +120,9 @@ pub fn listen_for_master_commands(
         // Process Redis commands after RDB has been received
         if received_rdb {
             if let Ok(partial_str) = std::str::from_utf8(&partial_message) {
-                process_commands_after_rdb(&mut partial_str.to_string(), db.clone(), config_map, stream)?;
+                if partial_str.len()>0{
+                    process_commands_after_rdb(&mut partial_str.to_string(), db.clone(), config_map, stream)?;
+                }
             }
         }
     }
