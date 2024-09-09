@@ -12,7 +12,6 @@ pub fn send_replconf(
     db: Arc<Mutex<RedisDatabase>>,
     config_map: &HashMap<String, String>,
 ) -> io::Result<()> {
-    // Send REPLCONF listening-port with the correct port
     let replconf_listening_port = format!(
         "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n${}\r\n{}\r\n",
         port.len(),
@@ -21,11 +20,9 @@ pub fn send_replconf(
     stream.write_all(replconf_listening_port.as_bytes())?;
     println!("Sent REPLCONF listening-port with port: {}", port);
 
-    // Send REPLCONF capa eof capa psync2
     stream.write_all(b"*5\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$3\r\neof\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n")?;
     println!("Sent REPLCONF capa eof capa psync2");
 
-    // Wait for +OK response from the master
     let mut buffer = vec![0; 512];
     let bytes_read = stream.read(&mut buffer)?;
     let response = String::from_utf8_lossy(&buffer[..bytes_read]);
@@ -90,47 +87,45 @@ pub fn listen_for_master_commands(
 
         // Process Redis commands after RDB has been received
         if received_rdb {
-            println!("Received Redis command: {}", partial_message);
-            while !partial_message.is_empty() {
-                if let Some((command, args, _, consumed_length)) = process_complete_redis_message(&partial_message, &db, config_map) {
-                    // Remove the processed part from the partial message
-                    partial_message.drain(..consumed_length);
-                    println!("partial_message after drain: {}", partial_message);
-
-                    if let Some(cmd) = command {
-                        if cmd == "SET" && args.len() >= 2 {
-                            let key = args[0].clone();
-                            let value = args[1].clone();
-                            db.lock().unwrap().insert(key.clone(), RedisValue::new(value.clone(), None));
-                            println!("Applied SET command: {} = {}", key, value);
-                        }
-                    }
-
-                } else {
-                    // If we don't have a complete message, break the loop and wait for more data
-                    break;
-                }
-            }
+            process_commands_after_rdb(&mut partial_message, db.clone(), config_map)?;
         }
     }
     Ok(())
 }
 
-// Helper function to process complete Redis messages
-fn process_complete_redis_message(
-    partial_message: &str,
-    db: &Arc<Mutex<RedisDatabase>>,
+// Processes Redis commands after the RDB file has been received
+fn process_commands_after_rdb(
+    partial_message: &mut String,
+    db: Arc<Mutex<RedisDatabase>>,
     config_map: &HashMap<String, String>,
-) -> Option<(Option<String>, Vec<String>, String, usize)> {
+) -> io::Result<()> {
     let mut db_lock = db.lock().unwrap();
 
-    // Parse the Redis message, return the command, args, response, and how much was consumed
-    if let (command, args, response, consumed_length) = parse_redis_message(partial_message, &mut db_lock, config_map) {
-        // Return the parsed command, arguments, response, and the length of the consumed message
-        return Some((command, args, response, consumed_length));
+    // Parse the Redis message and handle the parsed commands
+    let parsed_results = parse_redis_message(&partial_message, &mut db_lock, config_map);
+    
+    for (command, args, response, consumed_length) in parsed_results {
+        // Remove the processed part from the partial message
+        partial_message.drain(..consumed_length);
+        println!("partial_message after drain: {}", partial_message);
+
+        if let Some(cmd) = command {
+            match cmd.as_str() {
+                "SET" => {
+                    if args.len() >= 2 {
+                        let key = args[0].clone();
+                        let value = args[1].clone();
+                        db_lock.insert(key.clone(), RedisValue::new(value.clone(), None));
+                        println!("Applied SET command: {} = {}", key, value);
+                    }
+                },
+                // Handle other commands as needed
+                _ => println!("Unknown command: {}", cmd),
+            }
+        }
     }
 
-    None
+    Ok(())
 }
 
 // Helper function to parse the FULLRESYNC command and extract replid and offset
@@ -147,7 +142,6 @@ fn parse_fullresync(message: &str) -> Option<(String, String)> {
 
 // Helper function to parse bulk length from the Redis message
 fn parse_bulk_length(message: &str) -> Option<usize> {
-    // We expect the bulk string to start with '$' followed by the length
     if message.starts_with('$') {
         let parts: Vec<&str> = message.split("\r\n").collect();
         if parts.len() > 1 {
@@ -172,18 +166,14 @@ pub fn initialize_replication(
         let address = format!("{}:{}", ip, replica_port);
 
         {
-            // Lock the database to set replication info as "slave"
             let mut db_lock = db.lock().unwrap();
             db_lock.replication_info.insert("role".to_string(), "slave".to_string());
             println!("Replication info updated to 'slave'.");
         }
 
-        // Connect to the master and initiate the replication handshake
         match TcpStream::connect(address.clone()) {
             Ok(mut stream) => {
                 println!("Connected to master at {}", address);
-
-                // Send PING to the master
                 stream.write_all(b"*1\r\n$4\r\nPING\r\n").unwrap();
                 stream.set_nodelay(true).unwrap();
 
@@ -191,7 +181,6 @@ pub fn initialize_replication(
                 match stream.read(&mut buffer) {
                     Ok(_) => {
                         println!("Received PING response from master");
-                        // Send REPLCONF commands, using the dynamically provided port
                         let _ = send_replconf(&mut stream, port, db.clone(), config_map);
                     }
                     Err(e) => eprintln!("Failed to receive PING response: {}", e),
@@ -200,7 +189,6 @@ pub fn initialize_replication(
             Err(e) => eprintln!("Failed to connect to master at {}: {}", address, e),
         }
     } else {
-        // If no replicaof is present, the server acts as a master
         let mut db_lock = db.lock().unwrap();
         db_lock.replication_info.insert("role".to_string(), "master".to_string());
         db_lock.replication_info.insert("master_replid".to_string(), "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string());

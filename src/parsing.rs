@@ -7,14 +7,17 @@ pub fn parse_redis_message(
     message: &str,
     db: &mut RedisDatabase,
     config_map: &HashMap<String, String>,
-) -> (Option<String>, Vec<String>, String, usize) {
+) -> Vec<(Option<String>, Vec<String>, String, usize)> {
     let mut lines = message.lines();
-    let mut command = None;
-    let mut args = Vec::new();
-    let mut arg_count = 0;
-    let mut consumed_length = 0;
+    let mut results = Vec::new();
+    let mut partial_message = String::new();
 
-    if let Some(line) = lines.next() {
+    while let Some(line) = lines.next() {
+        let mut command = None;
+        let mut args = Vec::new();
+        let mut arg_count = 0;
+        let mut consumed_length = 0;
+
         consumed_length += line.len() + 2;  // Include \r\n
 
         if line.starts_with('*') {
@@ -22,7 +25,8 @@ pub fn parse_redis_message(
             if let Ok(count) = line[1..].parse::<usize>() {
                 arg_count = count;
             } else {
-                return (None, vec![], "-ERR invalid argument count\r\n".to_string(), consumed_length);
+                results.push((None, vec![], "-ERR invalid argument count\r\n".to_string(), consumed_length));
+                continue;
             }
 
             // Parse the bulk strings (arguments) in RESP format
@@ -41,13 +45,18 @@ pub fn parse_redis_message(
                             // Subsequent arguments
                             args.push(arg.to_string());
                         }
+                    } else {
+                        // Incomplete message, return what we have so far
+                        partial_message.push_str(&line);
+                        break;
                     }
                 }
             }
 
             // Ensure the number of arguments matches the declared count
             if args.len() + 1 != arg_count {
-                return (command, args, "-ERR argument count mismatch\r\n".to_string(), consumed_length);
+                results.push((command, args, "-ERR argument count mismatch\r\n".to_string(), consumed_length));
+                continue;
             }
 
             // Debug output for parsed command and arguments
@@ -67,11 +76,11 @@ pub fn parse_redis_message(
                 _ => "-ERR unknown command\r\n".to_string(),
             };
 
-            return (command, args, response, consumed_length);  // Return parsed command, args, response, and consumed length
+            results.push((command, args, response, consumed_length));  // Return parsed command, args, response, and consumed length
         } else {
-            return (None, vec![], "-ERR invalid format\r\n".to_string(), consumed_length);
+            results.push((None, vec![], "-ERR invalid format\r\n".to_string(), consumed_length));
         }
-    } else {
-        return (None, vec![], "-ERR empty message\r\n".to_string(), consumed_length);
     }
+
+    results
 }
