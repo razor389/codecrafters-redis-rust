@@ -49,6 +49,8 @@ pub async fn listen_for_master_commands(
 ) -> io::Result<()> {
     let mut buffer = vec![0; 512];  // Buffer to store incoming data
     let mut partial_message = String::new();
+    let mut expecting_rdb = false;  // Track whether we are expecting an RDB file
+    let mut rdb_bulk_len = 0;       // Length of the RDB file to receive
 
     loop {
         // Read from the master
@@ -64,35 +66,26 @@ pub async fn listen_for_master_commands(
         let message = String::from_utf8_lossy(&buffer[..bytes_read]);
         partial_message.push_str(&message);
 
-        // Check for FULLRESYNC or CONTINUE message before sending PSYNC
-        if partial_message.starts_with("+FULLRESYNC") || partial_message.starts_with("+CONTINUE") {
-            let parts: Vec<&str> = partial_message.split_whitespace().collect();
-            if partial_message.starts_with("+FULLRESYNC") && parts.len() >= 3 {
-                let master_replid = parts[1];
-                let master_offset = parts[2];
+        // Check if we are expecting an RDB file (bulk string)
+        if !expecting_rdb && partial_message.starts_with("+FULLRESYNC") {
+            if let Some(length) = parse_bulk_length(&partial_message) {
+                rdb_bulk_len = length;
+                expecting_rdb = true;
+                println!("Expecting RDB file of length: {}", rdb_bulk_len);
+            }
+            partial_message.clear();  // Clear message after detecting FULLRESYNC
+        }
 
-                println!("Received FULLRESYNC with replid: {} and offset: {}", master_replid, master_offset);
-
-                // Store master_replid and master_offset in the Redis database
-                {
-                    let mut db_lock = db.lock().await;
-                    db_lock.replication_info.insert("master_replid".to_string(), master_replid.to_string());
-                    db_lock.replication_info.insert("master_repl_offset".to_string(), master_offset.to_string());
-                }
-
-                // After FULLRESYNC, expect the RDB file
-                if let Some(rdb_bulk_len) = parse_bulk_length(&partial_message) {
-                    let _rdb_data = receive_bulk_string(stream, rdb_bulk_len).await?;
-                    println!("RDB file received, length: {}", rdb_bulk_len);
-
-                    // Process the RDB data if needed
-                    // You may want to handle the RDB content here
-
-                    // After handling the RDB, reset the partial message and process further commands
-                    partial_message.clear();
-                }
+        // Handle RDB bulk string (starts with '$')
+        if expecting_rdb {
+            if let Some(rdb_data) = receive_bulk_string(stream, rdb_bulk_len).await? {
+                println!("Received RDB file, length: {}", rdb_data.len());
+                expecting_rdb = false;  // Finished receiving the RDB file
+                partial_message.clear();  // Clear the buffer
+                continue;  // Go to the next iteration to handle commands
             }
         }
+
         // Handle "+OK\r\n" to send the PSYNC command
         else if partial_message == "+OK\r\n" {
             println!("Received +OK from master. Sending PSYNC command...");
@@ -101,7 +94,8 @@ pub async fn listen_for_master_commands(
                 .await?;
             partial_message.clear(); // Clear after handling the +OK
         }
-        // Handle remaining Redis commands (SET, GET, etc.)
+
+        // Handle remaining Redis commands (SET, GET, etc.) after RDB file
         else if partial_message.contains("\r\n") {
             // If we have a complete Redis command, parse it
             if let Ok(mut db_lock) = db.try_lock() {
@@ -143,14 +137,14 @@ fn parse_bulk_length(message: &str) -> Option<usize> {
     None
 }
 
-// Helper function to receive bulk string data
+// Helper function to receive bulk string data (such as the RDB file)
 async fn receive_bulk_string(
     stream: &mut TcpStream,
     length: usize
-) -> io::Result<String> {
+) -> io::Result<Option<String>> {
     let mut data = vec![0; length];
     stream.read_exact(&mut data).await?;
-    Ok(String::from_utf8_lossy(&data).to_string())
+    Ok(Some(String::from_utf8_lossy(&data).to_string()))
 }
 
 
