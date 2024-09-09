@@ -47,7 +47,7 @@ pub fn listen_for_master_commands(
     let mut buffer = vec![0; 512];
     let mut partial_message = Vec::new();
     let mut received_rdb = false;
-    let mut remaining_bulk_bytes = 0;
+    let mut remaining_bulk_bytes;
 
     loop {
         let bytes_read = stream.read(&mut buffer)?;
@@ -110,7 +110,6 @@ pub fn listen_for_master_commands(
                 // Now drain the entire bulk string corresponding to the RDB file
                 if partial_message.len() >= remaining_bulk_bytes {
                     partial_message.drain(..remaining_bulk_bytes);
-                    remaining_bulk_bytes = 0;
                     received_rdb = true;
                     println!("RDB file fully received and processed.");
                 }
