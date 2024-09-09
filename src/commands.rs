@@ -155,7 +155,6 @@ fn hex_to_bytes(hex: &str) -> Vec<u8> {
     bytes
 }
 
-// Processes Redis commands after the RDB file has been received
 pub fn process_commands_after_rdb(
     partial_message: &mut String,
     db: Arc<Mutex<RedisDatabase>>,
@@ -168,22 +167,26 @@ pub fn process_commands_after_rdb(
     let parsed_results = parse_redis_message(&partial_message, &mut db_lock, config_map);
 
     for (command, args, response, consumed_length, command_msg_length_bytes) in parsed_results {
-        // Remove the processed part from the partial message
-        // Check if the consumed_length is within bounds before calling drain
-        if consumed_length > partial_message.len() {
+        // Ensure we are draining the string based on bytes
+        let partial_message_bytes = partial_message.as_bytes();
+
+        // Check if the consumed_length is within bounds before proceeding
+        if consumed_length > partial_message_bytes.len() {
             eprintln!(
-                "Error: consumed_length ({}) exceeds partial_message length ({}).",
+                "Error: consumed_length ({}) exceeds partial_message byte length ({}).",
                 consumed_length,
-                partial_message.len()
+                partial_message_bytes.len()
             );
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "Consumed length exceeds the partial message length",
+                "Consumed length exceeds the partial message byte length",
             ));
         }
 
-        // Safe to drain the partial_message
-        partial_message.drain(..consumed_length);
+        // Safely drain the bytes from the partial_message and convert back to a String
+        let remaining_bytes = &partial_message_bytes[consumed_length..];
+        *partial_message = String::from_utf8_lossy(remaining_bytes).to_string();
+
         println!("partial_message after drain: {}", partial_message);
         
         if let Some(cmd) = command {
@@ -203,7 +206,6 @@ pub fn process_commands_after_rdb(
                     println!("REPLCONF command received, responding with: {}", response);
                     stream.write_all(response.as_bytes())?;
                 },
-                // Handle other commands as needed
                 _ => println!("Unknown command: {}", cmd),
             }
         }
