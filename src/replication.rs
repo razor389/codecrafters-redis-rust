@@ -3,7 +3,7 @@ use tokio::net::TcpStream;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use crate::database::RedisDatabase;
+use crate::database::{RedisDatabase, RedisValue};
 use crate::parsing::parse_redis_message;
 
 // Sends REPLCONF commands to the master after receiving the PING response
@@ -79,8 +79,6 @@ pub async fn listen_for_master_commands(
                     db_lock.replication_info.insert("master_replid".to_string(), master_replid.to_string());
                     db_lock.replication_info.insert("master_repl_offset".to_string(), master_offset.to_string());
                 }
-
-                
             }
         }
         // Handle RDB file as a bulk string (starts with $)
@@ -89,7 +87,26 @@ pub async fn listen_for_master_commands(
         }
         else if message.starts_with('*') {
             println!("Received multi-bulk response from master: {}", message);
-            continue; // Ignore multi-bulk responses for now
+
+            // Parse the Redis message and handle commands like SET
+            if let Ok(mut db_lock) = db.try_lock() {
+                let (command, args, _) = parse_redis_message(&message, &mut db_lock, config_map);
+
+                // Log the command and response for debugging purposes
+                println!("Parsed command: {:?}, Args: {:?}", command, args);
+
+                // Apply SET command to the slave's local database
+                if let Some(cmd) = command {
+                    if cmd == "SET" && args.len() >= 2 {
+                        let key = args[0].clone();  // Access key from args
+                        let value = args[1].clone();  // Access value from args
+                        db_lock.insert(key, RedisValue::new(value, None));  // Insert into database
+                        println!("Applied SET command from master: {} = {}", args[0], args[1]);
+                    }
+                }
+            } else {
+                eprintln!("Failed to acquire lock for command processing.");
+            }
         }
         // Handle Redis commands after the RDB is processed
         else {
@@ -99,23 +116,6 @@ pub async fn listen_for_master_commands(
                 println!("Proceeding with PSYNC...");
                 stream.write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n").await?;
                 continue; // Ignore PING responses
-            }
-
-            // Parse the Redis message and handle commands like SET, GET, etc.
-            if let Ok(mut db_lock) = db.try_lock() {
-                let (command, response) = parse_redis_message(&message, &mut db_lock, config_map);
-
-                // Log the command and response for debugging purposes
-                println!("Parsed command: {:?}, Response: {}", command, response);
-
-                // Only send responses back for certain commands (e.g., SET, GET)
-                if let Some(cmd) = command {
-                    if cmd == "SET" || cmd == "GET" {
-                        stream.write_all(response.as_bytes()).await?;
-                    }
-                }
-            } else {
-                eprintln!("Failed to acquire lock for command processing.");
             }
         }
     }

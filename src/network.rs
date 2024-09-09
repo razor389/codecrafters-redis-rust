@@ -62,7 +62,7 @@ async fn handle_client(
         if partial_message.ends_with("\r\n") {
             println!("Received message: {}", partial_message);
 
-            let (command, response) = {
+            let (command, _, response) = {
                 // Acquire lock briefly for database operations
                 let mut db_lock = db.lock().await;
                 parse_redis_message(&partial_message, &mut db_lock, config_map)

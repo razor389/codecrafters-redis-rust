@@ -7,7 +7,7 @@ pub fn parse_redis_message(
     message: &str,
     db: &mut RedisDatabase,
     config_map: &HashMap<String, String>,
-) -> (Option<String>, String) {
+) -> (Option<String>, Vec<String>, String) {  // Return command, args, and response
     let mut lines = message.lines();
 
     if let Some(line) = lines.next() {
@@ -39,7 +39,7 @@ pub fn parse_redis_message(
 
             // Ensure the number of collected args matches the declared arg count
             if args.len() + 1 != arg_count {
-                return (command, "-ERR argument count mismatch\r\n".to_string());
+                return (command, args, "-ERR argument count mismatch\r\n".to_string());
             }
 
             // Match the command with appropriate handler
@@ -56,11 +56,11 @@ pub fn parse_redis_message(
                 _ => "-ERR unknown command\r\n".to_string(),
             };
 
-            return (command, response);
+            return (command, args, response);  // Return command, args, and response
         } else {
-            return (None, "-ERR invalid format\r\n".to_string());
+            return (None, vec![], "-ERR invalid format\r\n".to_string());
         }
     } else {
-        return (None, "-ERR empty message\r\n".to_string());
+        return (None, vec![], "-ERR empty message\r\n".to_string());
     }
 }
