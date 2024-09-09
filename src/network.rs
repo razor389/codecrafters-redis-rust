@@ -97,6 +97,7 @@ async fn handle_client(
             } else {
                 // Write the response to the client
                 {
+                    println!("Sending response: {}", response);
                     let mut locked_stream = stream.lock().await;
                     locked_stream.write_all(response.as_bytes()).await?;
                     locked_stream.flush().await?;
