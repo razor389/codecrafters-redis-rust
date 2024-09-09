@@ -103,7 +103,7 @@ pub async fn listen_for_master_commands(
                 // Now check for any remaining data (like SET commands) after the RDB
                 if !partial_message.is_empty() {
                     println!("Remaining data after RDB file: {:?}", partial_message);
-                    // Fall through to process the remaining commands
+                    // Now process the remaining commands
                 }
             } else {
                 continue;  // Wait for more data if the RDB isn't fully received yet
