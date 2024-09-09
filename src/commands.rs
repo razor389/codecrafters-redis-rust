@@ -1,6 +1,6 @@
-// src/commands.rs
 use crate::database::{RedisDatabase, RedisValue};
-use std::{collections::HashMap, io::Write, net::TcpStream};
+use std::collections::HashMap;
+use tokio::{io::AsyncWriteExt, net::TcpStream};
 
 pub fn handle_set(db: &mut RedisDatabase, args: &[String]) -> String {
     if args.len() == 2 {
@@ -103,8 +103,8 @@ pub fn handle_psync(db: &RedisDatabase, args: &[String]) -> String {
     }
 }
 
-// Function to send the binary RDB file in RESP bulk string format
-pub fn send_rdb_file(stream: &mut TcpStream) -> std::io::Result<()> {
+// Function to send the binary RDB file in RESP bulk string format asynchronously
+pub async fn send_rdb_file(stream: &mut TcpStream) -> std::io::Result<()> {
     // Hex representation of the empty RDB file
     let hex_rdb = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
 
@@ -115,10 +115,10 @@ pub fn send_rdb_file(stream: &mut TcpStream) -> std::io::Result<()> {
     let length_header = format!("${}\r\n", binary_data.len());
     
     // Send the length header first
-    stream.write_all(length_header.as_bytes())?;
+    stream.write_all(length_header.as_bytes()).await?;
 
     // Send the raw binary data
-    stream.write_all(&binary_data)?;
+    stream.write_all(&binary_data).await?;
 
     Ok(())
 }

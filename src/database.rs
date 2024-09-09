@@ -1,14 +1,13 @@
-// src/database.rs
 use std::collections::HashMap;
-use std::net::TcpStream;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::vec;
+use tokio::net::TcpStream;
+use tokio::sync::Mutex;
 
 pub struct RedisDatabase {
     pub data: HashMap<String, RedisValue>,
     pub replication_info: HashMap<String, String>,
-    pub slave_connections: Vec<Arc<Mutex<TcpStream>>>, // Changed to store multiple slave connections
+    pub slave_connections: Vec<Arc<Mutex<TcpStream>>>, // Changed to store multiple slave connections as async TcpStream
 }
 
 impl RedisDatabase {
@@ -81,3 +80,4 @@ impl RedisValue {
         &self.value
     }
 }
+
