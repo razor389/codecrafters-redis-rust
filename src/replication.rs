@@ -98,7 +98,7 @@ pub async fn listen_for_master_commands(
                 if let Some((command, args, _, consumed_length)) = process_complete_redis_message(&partial_message, &db, config_map).await {
                     // Remove the processed part from the partial message
                     partial_message.drain(..consumed_length);
-
+                    println!("partial_message after drain: {}", partial_message);
                     if let Some(cmd) = command {
                         if cmd == "SET" && args.len() >= 2 {
                             let key = args[0].clone();
