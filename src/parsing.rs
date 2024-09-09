@@ -8,77 +8,87 @@ pub fn parse_redis_message(
     db: &mut RedisDatabase,
     config_map: &HashMap<String, String>,
 ) -> Vec<(Option<String>, Vec<String>, String, usize)> {
-    let mut lines = message.lines();
     let mut results = Vec::new();
-    println!("Parsing message: {}", message);
-    
-    while let Some(line) = lines.next() {
-        let mut command = None;
-        let mut args = Vec::new();
-        let mut arg_count = 0;
-        let mut consumed_length = 0;
+    let mut cursor = 0;
+    let bytes = message.as_bytes();
 
-        consumed_length += line.len() + 2;  // Include \r\n
+    while cursor < bytes.len() {
+        // Check for argument count prefix *
+        if bytes[cursor] == b'*' {
+            cursor += 1; // Move past '*'
 
-        if line.starts_with('*') {
-            // Parse the argument count
-            if let Ok(count) = line[1..].parse::<usize>() {
-                arg_count = count;
-            } else {
-                results.push((None, vec![], "-ERR invalid argument count\r\n".to_string(), consumed_length));
-                continue;
-            }
+            // Parse the number of arguments
+            let end = match find_crlf(&bytes[cursor..]) {
+                Some(e) => e,
+                None => {
+                    results.push((None, vec![], "-ERR incomplete message\r\n".to_string(), cursor));
+                    break;
+                }
+            };
 
-            // Parse the bulk strings (arguments) in RESP format
+            let arg_count = match std::str::from_utf8(&bytes[cursor..cursor + end])
+                .ok()
+                .and_then(|s| s.parse::<usize>().ok())
+            {
+                Some(count) => count,
+                None => {
+                    results.push((None, vec![], "-ERR invalid argument count\r\n".to_string(), cursor));
+                    break;
+                }
+            };
+            cursor += end + 2; // Move past \r\n
+
+            let mut command = None;
+            let mut args = Vec::new();
+
+            // Parse each bulk string
             for _ in 0..arg_count {
-                if let Some(bulk_length_line) = lines.next() {
-                    consumed_length += bulk_length_line.len() + 2;  // Include \r\n
+                // Expect $ for bulk string
+                if bytes[cursor] == b'$' {
+                    cursor += 1; // Move past '$'
 
-                    if bulk_length_line.starts_with('$') {
-                        // Parse bulk string length
-                        let bulk_length: usize = match bulk_length_line[1..].parse() {
-                            Ok(len) => len,
-                            Err(_) => {
-                                results.push((None, vec![], "-ERR invalid bulk string length\r\n".to_string(), consumed_length));
-                                continue;
-                            }
-                        };
-
-                        // Now get the actual argument
-                        if let Some(arg) = lines.next() {
-                            consumed_length += arg.len() + 2;  // Include \r\n
-
-                            if command.is_none() {
-                                // First argument is the command
-                                command = Some(arg.to_uppercase());
-                            } else {
-                                // Subsequent arguments
-                                args.push(arg.to_string());
-                            }
-                        } else {
-                            // Incomplete message, return what we have so far
+                    // Get bulk string length
+                    let end = match find_crlf(&bytes[cursor..]) {
+                        Some(e) => e,
+                        None => {
+                            results.push((None, vec![], "-ERR incomplete message\r\n".to_string(), cursor));
                             break;
                         }
+                    };
+
+                    let bulk_len = match std::str::from_utf8(&bytes[cursor..cursor + end])
+                        .ok()
+                        .and_then(|s| s.parse::<usize>().ok())
+                    {
+                        Some(len) => len,
+                        None => {
+                            results.push((None, vec![], "-ERR invalid bulk string length\r\n".to_string(), cursor));
+                            break;
+                        }
+                    };
+                    cursor += end + 2; // Move past \r\n
+
+                    // Extract bulk string
+                    if cursor + bulk_len + 2 <= bytes.len() {
+                        let bulk_string = &message[cursor..cursor + bulk_len];
+                        cursor += bulk_len + 2; // Move past the string and \r\n
+
+                        if command.is_none() {
+                            command = Some(bulk_string.to_uppercase());
+                        } else {
+                            args.push(bulk_string.to_string());
+                        }
                     } else {
-                        results.push((None, vec![], "-ERR expected bulk string\r\n".to_string(), consumed_length));
-                        continue;
+                        results.push((None, vec![], "-ERR incomplete bulk string\r\n".to_string(), cursor));
+                        break;
                     }
                 } else {
-                    // Incomplete message, return what we have so far
+                    results.push((None, vec![], "-ERR expected bulk string\r\n".to_string(), cursor));
                     break;
                 }
             }
 
-            // Ensure the number of arguments matches the declared count
-            if args.len() + 1 != arg_count {
-                results.push((command, args, "-ERR argument count mismatch\r\n".to_string(), consumed_length));
-                continue;
-            }
-
-            // Debug output for parsed command and arguments
-            println!("Parsed command: {:?}, Args: {:?}", command, args);
-
-            // Match the command with appropriate handler
+            // Handle the command once all args are collected
             let response = match command.as_deref() {
                 Some("SET") => handle_set(db, &args),
                 Some("GET") => handle_get(db, &args),
@@ -92,11 +102,23 @@ pub fn parse_redis_message(
                 _ => "-ERR unknown command\r\n".to_string(),
             };
 
-            results.push((command, args, response, consumed_length));  // Return parsed command, args, response, and consumed length
+            // Push the result (command, args, response, cursor)
+            results.push((command, args, response, cursor));
         } else {
-            results.push((None, vec![], "-ERR invalid format\r\n".to_string(), consumed_length));
+            results.push((None, vec![], "-ERR invalid format\r\n".to_string(), cursor));
+            break;
         }
     }
 
     results
+}
+
+// Helper function to find CRLF (\r\n)
+fn find_crlf(bytes: &[u8]) -> Option<usize> {
+    for i in 0..bytes.len() - 1 {
+        if bytes[i] == b'\r' && bytes[i + 1] == b'\n' {
+            return Some(i);
+        }
+    }
+    None
 }
