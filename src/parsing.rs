@@ -109,6 +109,7 @@ pub fn parse_redis_message(
             // Incrementally update the bytes_processed
             if let Some(ReplicationInfoValue::StringValue(role)) = db.get_replication_info("role") {
                 if role == "slave" {
+                    println!("updating slave repl offset");
                     let cmd_bytes = match db.get_replication_info("slave_repl_offset") {
                         Some(ReplicationInfoValue::ByteValue(current_bytes)) => {
                             current_bytes + byte_length
