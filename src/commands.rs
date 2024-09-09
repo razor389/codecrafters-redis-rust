@@ -89,6 +89,15 @@ pub fn handle_info(db: &RedisDatabase, args: &[String]) -> String {
     }
 }
 
+// Handle the WAIT command
+pub fn handle_wait(db: &RedisDatabase, args: &[String]) -> String {
+    if args.len() == 2 {
+        let num_slaves = db.slave_connections.len();
+        format!(":{}\r\n", num_slaves)
+    } else{
+        "-ERR wrong number of arguments for WAIT\r\n".to_string()
+    }
+}
 
 // Handle the REPLCONF command
 pub fn handle_replconf(db: &RedisDatabase, args: &[String]) -> String {
