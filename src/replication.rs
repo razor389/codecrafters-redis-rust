@@ -47,7 +47,7 @@ pub async fn listen_for_master_commands(
     db: Arc<Mutex<RedisDatabase>>,
     config_map: &HashMap<String, String>,
 ) -> io::Result<()> {
-    let mut buffer = vec![0; 512];  // Buffer to store incoming data
+    let mut buffer = vec![0; 512]; // Buffer to store incoming data
     let mut partial_message = String::new();
     let mut expecting_rdb = false;  // Track whether we are expecting an RDB file
     let mut rdb_bulk_len = 0;       // Length of the RDB file to receive
@@ -66,18 +66,31 @@ pub async fn listen_for_master_commands(
         let message = String::from_utf8_lossy(&buffer[..bytes_read]);
         partial_message.push_str(&message);
 
-        // Handle FULLRESYNC and RDB file
-        if !expecting_rdb && partial_message.starts_with("+FULLRESYNC") {
-            println!("Received FULLRESYNC from master.");
+        // Handle FULLRESYNC and extract replid and offset
+        if partial_message.starts_with("+FULLRESYNC") {
+            if let Some((replid, offset)) = parse_fullresync(&partial_message) {
+                // Store master_replid and master_offset in the Redis database
+                {
+                    let mut db_lock = db.lock().await;
+                    db_lock.replication_info.insert("master_replid".to_string(), replid.to_string());
+                    db_lock.replication_info.insert("master_repl_offset".to_string(), offset.to_string());
+                }
+                println!("Received FULLRESYNC with replid: {} and offset: {}", replid, offset);
+                partial_message.clear();
+            }
+        }
+
+        // Handle the RDB file bulk string (starts with '$')
+        if partial_message.starts_with('$') && !expecting_rdb {
             if let Some(length) = parse_bulk_length(&partial_message) {
                 rdb_bulk_len = length;
                 expecting_rdb = true;
                 println!("Expecting RDB file of length: {}", rdb_bulk_len);
             }
-            partial_message.clear();  // Clear message after detecting FULLRESYNC
+            partial_message.clear();  // Clear the buffer after parsing bulk length
         }
 
-        // Handle RDB bulk string (starts with '$')
+        // If we're expecting an RDB file, process it
         if expecting_rdb {
             if let Some(rdb_data) = receive_bulk_string(stream, rdb_bulk_len).await? {
                 println!("Received RDB file, length: {}", rdb_data.len());
@@ -85,15 +98,6 @@ pub async fn listen_for_master_commands(
                 partial_message.clear();  // Clear the buffer
                 continue;  // Go to the next iteration to handle commands
             }
-        }
-
-        // Handle "+OK\r\n" to send the PSYNC command
-        else if partial_message == "+OK\r\n" {
-            println!("Received +OK from master. Sending PSYNC command...");
-            stream
-                .write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n")
-                .await?;
-            partial_message.clear(); // Clear after handling the +OK
         }
 
         // Now handle Redis commands after the RDB file
@@ -127,26 +131,43 @@ pub async fn listen_for_master_commands(
     Ok(())
 }
 
-// Helper function to parse bulk string length from the RESP message
-fn parse_bulk_length(message: &str) -> Option<usize> {
-    if message.starts_with('$') {
-        if let Some(newline_idx) = message.find("\r\n") {
-            if let Ok(len) = message[1..newline_idx].parse::<usize>() {
-                return Some(len);
-            }
-        }
+// Helper function to parse the FULLRESYNC command and extract replid and offset
+fn parse_fullresync(message: &str) -> Option<(String, String)> {
+    let parts: Vec<&str> = message.split_whitespace().collect();
+    if parts.len() >= 3 {
+        let replid = parts[1].to_string();
+        let offset = parts[2].to_string();
+        Some((replid, offset))
+    } else {
+        None
     }
-    None
 }
 
-// Helper function to receive bulk string data (such as the RDB file)
-async fn receive_bulk_string(
+// Helper function to parse bulk length from the Redis message
+fn parse_bulk_length(message: &str) -> Option<usize> {
+    if message.starts_with('$') {
+        if let Ok(length) = message[1..].trim().parse::<usize>() {
+            Some(length)
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+// Helper function to receive bulk strings like the RDB file
+pub async fn receive_bulk_string(
     stream: &mut TcpStream,
-    length: usize
-) -> io::Result<Option<String>> {
-    let mut data = vec![0; length];
-    stream.read_exact(&mut data).await?;
-    Ok(Some(String::from_utf8_lossy(&data).to_string()))
+    length: usize,
+) -> io::Result<Option<Vec<u8>>> {
+    let mut buffer = vec![0; length];
+    let bytes_read = stream.read_exact(&mut buffer).await?;
+    if bytes_read == length {
+        Ok(Some(buffer))
+    } else {
+        Ok(None)
+    }
 }
 
 
