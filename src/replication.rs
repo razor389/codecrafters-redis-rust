@@ -94,8 +94,8 @@ pub fn listen_for_master_commands(
                     // Read more data from the stream until we have enough to process the entire RDB file
                     let bytes_read = stream.read(&mut buffer)?;
                     if bytes_read == 0 {
-                        println!("Connection closed by master.");
-                        break;
+                        println!("no bytes read from master, continuing.");
+                        continue;
                     }
                     let additional_message = String::from_utf8_lossy(&buffer[..bytes_read]);
                     partial_message.push_str(&additional_message);
