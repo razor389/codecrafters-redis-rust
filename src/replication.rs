@@ -82,7 +82,7 @@ pub fn listen_for_master_commands(
             if let Some(bulk_length) = parse_bulk_length(&partial_message) {
                 println!("bulk length: {}", bulk_length);
                 // Remove the bulk string header ($<length>\r\n)
-                let header_size = partial_message.find("\r\n").unwrap();
+                let header_size = partial_message.find("\r\n").unwrap()+2;
                 partial_message.drain(..header_size);
 
                 // Set the number of bytes to expect in the bulk string body
