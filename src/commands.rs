@@ -169,6 +169,20 @@ pub fn process_commands_after_rdb(
 
     for (command, args, response, consumed_length, command_msg_length_bytes) in parsed_results {
         // Remove the processed part from the partial message
+        // Check if the consumed_length is within bounds before calling drain
+        if consumed_length > partial_message.len() {
+            eprintln!(
+                "Error: consumed_length ({}) exceeds partial_message length ({}).",
+                consumed_length,
+                partial_message.len()
+            );
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Consumed length exceeds the partial message length",
+            ));
+        }
+
+        // Safe to drain the partial_message
         partial_message.drain(..consumed_length);
         println!("partial_message after drain: {}", partial_message);
         
