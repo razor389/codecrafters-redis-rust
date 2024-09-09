@@ -165,7 +165,7 @@ pub fn process_commands_after_rdb(
 
     // Parse the Redis message and handle the parsed commands
     let parsed_results = parse_redis_message(&partial_message, &mut db_lock, config_map);
-
+    println!("parsed results: {:?}", parsed_results);
     for (command, args, response, consumed_length, command_msg_length_bytes) in parsed_results {
         // Ensure we are draining the string based on bytes
         let partial_message_bytes = partial_message.as_bytes();
