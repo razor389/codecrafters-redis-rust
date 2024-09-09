@@ -97,7 +97,7 @@ pub async fn listen_for_master_commands(
         if expecting_rdb {
             // Read the RDB file data
             let rdb_data = receive_rdb_file(stream, rdb_bulk_len).await?;
-            println!("Received RDB file: {:?}", rdb_data);
+            println!("Received RDB file: {:?} of length: {}", rdb_data, rdb_data.len());
             expecting_rdb = false;
             partial_message.clear();  // Clear the buffer after handling the RDB file
             continue;
