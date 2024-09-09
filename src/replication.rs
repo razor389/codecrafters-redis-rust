@@ -107,6 +107,7 @@ pub fn listen_for_master_commands(
                     remaining_bulk_bytes = 0;
                     received_rdb = true;
                     println!("RDB file fully received and processed.");
+                    println!("remaining message: {}", partial_message);
                 }
             }
         }
