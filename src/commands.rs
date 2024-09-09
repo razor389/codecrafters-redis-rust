@@ -166,15 +166,15 @@ pub fn process_commands_after_rdb(
     // Parse the Redis message and handle the parsed commands
     let parsed_results = parse_redis_message(&partial_message, &mut db_lock, config_map);
     println!("parsed results: {:?}", parsed_results);
-    for (command, args, response, consumed_length, command_msg_length_bytes) in parsed_results {
+    for (command, args, response, _cursor, command_msg_length_bytes) in parsed_results {
         // Ensure we are draining the string based on bytes
         let partial_message_bytes = partial_message.as_bytes();
 
         // Check if the consumed_length is within bounds before proceeding
-        if consumed_length > partial_message_bytes.len() {
+        if command_msg_length_bytes > partial_message_bytes.len() {
             eprintln!(
                 "Error: consumed_length ({}) exceeds partial_message byte length ({}).",
-                consumed_length,
+                command_msg_length_bytes,
                 partial_message_bytes.len()
             );
             return Err(io::Error::new(
@@ -184,7 +184,7 @@ pub fn process_commands_after_rdb(
         }
 
         // Safely drain the bytes from the partial_message and convert back to a String
-        let remaining_bytes = &partial_message_bytes[consumed_length..];
+        let remaining_bytes = &partial_message_bytes[command_msg_length_bytes..];
         *partial_message = String::from_utf8_lossy(remaining_bytes).to_string();
 
         println!("partial_message after drain: {}", partial_message);
