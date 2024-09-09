@@ -1,7 +1,6 @@
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::collections::HashMap;
-use std::num::ParseIntError;
 use std::sync::{Arc, Mutex};
 use crate::database::{RedisDatabase, RedisValue};
 use crate::parsing::parse_redis_message;
