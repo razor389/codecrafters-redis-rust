@@ -90,6 +90,7 @@ pub fn listen_for_master_commands(
 
                 // Spin until the entire bulk string (RDB file) is received
                 while partial_message.len() < remaining_bulk_bytes {
+                    println!("spinning here");
                     // Read more data from the stream until we have enough to process the entire RDB file
                     let bytes_read = stream.read(&mut buffer)?;
                     if bytes_read == 0 {
