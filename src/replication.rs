@@ -51,8 +51,8 @@ pub fn listen_for_master_commands(
     loop {
         let bytes_read = stream.read(&mut buffer)?;
         if bytes_read == 0 {
-            println!("Connection closed by master.");
-            break;
+            println!("no bytes read, continuing.");
+            continue;
         }
 
         let message = String::from_utf8_lossy(&buffer[..bytes_read]);
