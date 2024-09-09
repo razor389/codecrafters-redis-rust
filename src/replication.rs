@@ -80,7 +80,6 @@ pub fn listen_for_master_commands(
         if partial_message.starts_with('$') && !received_rdb {
             println!("Received RDB File: {}", partial_message);
             if let Some(length) = parse_bulk_length(&partial_message) {
-                println!("length {}", length);
                 received_rdb = true;
                 partial_message.clear();  // Clear the bulk length header but keep the rest
             }
@@ -150,6 +149,7 @@ fn parse_fullresync(message: &str) -> Option<(String, String)> {
 
 // Helper function to parse bulk length from the Redis message
 fn parse_bulk_length(message: &str) -> Option<usize> {
+    println!("message: {}", message);
     if message.starts_with('$') {
         let parts: Vec<&str> = message.split("\r\n").collect();
         if parts.len() > 1 {
