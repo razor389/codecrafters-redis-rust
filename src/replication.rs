@@ -44,7 +44,7 @@ pub fn listen_for_master_commands(
     config_map: &HashMap<String, String>,
 ) -> io::Result<()> {
     let mut buffer = vec![0; 512];
-    let mut partial_message = String::new();
+    let mut partial_message = Vec::new();
     let mut received_rdb = false;
     let mut remaining_bulk_bytes = 0;
 
@@ -55,34 +55,42 @@ pub fn listen_for_master_commands(
             break;
         }
 
-        let message = String::from_utf8_lossy(&buffer[..bytes_read]);
-        partial_message.push_str(&message);
+        partial_message.extend_from_slice(&buffer[..bytes_read]);
 
         // Handle "+OK\r\n" to send the PSYNC command
-        if partial_message == "+OK\r\n" {
-            println!("Received +OK from master. Sending PSYNC command...");
-            stream.write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n")?;
-            partial_message.clear(); // Clear after handling the +OK
-            continue;
-        }
+        if let Ok(partial_str) = std::str::from_utf8(&partial_message) {
+            if partial_str == "+OK\r\n" {
+                println!("Received +OK from master. Sending PSYNC command...");
+                stream.write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n")?;
+                partial_message.clear();
+                continue;
+            }
 
-        // Handle FULLRESYNC
-        if partial_message.starts_with("+FULLRESYNC") {
-            if let Some((replid, offset)) = parse_fullresync(&partial_message) {
-                let mut db_lock = db.lock().unwrap();
-                db_lock.replication_info.insert("master_replid".to_string(), replid.clone());
-                db_lock.replication_info.insert("master_repl_offset".to_string(), offset.clone());
-                println!("Handled FULLRESYNC: replid = {}, offset = {}", replid, offset);
-                partial_message.clear();  // Clear just the FULLRESYNC part
+            // Handle FULLRESYNC
+            if partial_str.starts_with("+FULLRESYNC") {
+                if let Some((replid, offset)) = parse_fullresync(partial_str) {
+                    let mut db_lock = db.lock().unwrap();
+                    db_lock.replication_info.insert("master_replid".to_string(), replid.clone());
+                    db_lock.replication_info.insert("master_repl_offset".to_string(), offset.clone());
+                    println!("Handled FULLRESYNC: replid = {}, offset = {}", replid, offset);
+                    partial_message.clear();
+                }
             }
         }
 
-        // Handle RDB file parsing
-        if partial_message.starts_with('$') && !received_rdb {
+        // Handle RDB file parsing (bulk string)
+        if !received_rdb && partial_message.starts_with(b"$") {
             if let Some(bulk_length) = parse_bulk_length(&partial_message) {
                 println!("bulk length: {}", bulk_length);
-                // Remove the bulk string header ($<length>\r\n)
-                let header_size = partial_message.find("\r\n").unwrap()+2;
+
+                // Find where the header ends ("$<length>\r\n")
+                let header_size = partial_message
+                    .windows(2)
+                    .position(|w| w == b"\r\n")
+                    .map(|pos| pos + 2)
+                    .unwrap_or(0);
+
+                // Drain the header bytes
                 partial_message.drain(..header_size);
 
                 // Set the number of bytes to expect in the bulk string body
@@ -90,19 +98,13 @@ pub fn listen_for_master_commands(
 
                 // Spin until the entire bulk string (RDB file) is received
                 while partial_message.len() < remaining_bulk_bytes {
-                    println!("spinning here");
-                
-                    // Read more data from the stream until we have enough to process the entire RDB file
                     let bytes_read = stream.read(&mut buffer)?;
                     if bytes_read == 0 {
                         println!("no bytes read from master, continuing.");
                         continue;
                     }
-                
-                    // Convert bytes to UTF-8 and append to the string
-                    partial_message.push_str(&String::from_utf8_lossy(&buffer[..bytes_read]));
-                    
-                    // Now partial_message.len() is still in bytes because Rust strings track byte length
+                    // Append raw bytes directly
+                    partial_message.extend_from_slice(&buffer[..bytes_read]);
                 }
 
                 // Now drain the entire bulk string corresponding to the RDB file
@@ -111,13 +113,12 @@ pub fn listen_for_master_commands(
                     remaining_bulk_bytes = 0;
                     received_rdb = true;
                     println!("RDB file fully received and processed.");
-                    println!("remaining message: {}", partial_message);
-                    println!("remaining message bytes: ")
+                    println!("remaining message bytes: {:?}", partial_message);
                 }
             }
         }
 
-        // If there are remaining bulk bytes, we wait for more data
+        // If there are remaining bulk bytes, wait for more data
         if remaining_bulk_bytes > 0 {
             // Consume the remaining bulk string bytes as they arrive
             if partial_message.len() >= remaining_bulk_bytes {
@@ -133,7 +134,11 @@ pub fn listen_for_master_commands(
 
         // Process Redis commands after RDB has been received
         if received_rdb {
-            process_commands_after_rdb(&mut partial_message, db.clone(), config_map, stream)?;
+            if let Ok(partial_str) = std::str::from_utf8(&partial_message) {
+                let mut partial_message_str = partial_str.to_string();
+                process_commands_after_rdb(&mut partial_message_str, db.clone(), config_map, stream)?;
+            }
+            
         }
     }
     Ok(())
@@ -152,16 +157,15 @@ fn parse_fullresync(message: &str) -> Option<(String, String)> {
 }
 
 // Helper function to parse bulk length from the Redis message
-fn parse_bulk_length(message: &str) -> Option<usize> {
-    if message.starts_with('$') {
-        let parts: Vec<&str> = message.split("\r\n").collect();
-        if parts.len() > 1 {
-            if let Ok(length) = parts[0][1..].parse::<usize>() {
-                return Some(length);
-            }
-        }
+fn parse_bulk_length(message: &[u8]) -> Option<usize> {
+    // Assuming the bulk length is specified after the "$" and before the "\r\n"
+    if message.starts_with(b"$") {
+        let newline_pos = message.windows(2).position(|w| w == b"\r\n")?;
+        let bulk_length_str = std::str::from_utf8(&message[1..newline_pos]).ok()?;
+        bulk_length_str.trim().parse::<usize>().ok()
+    } else {
+        None
     }
-    None
 }
 
 // Initializes replication settings, determining whether this server is a master or slave
