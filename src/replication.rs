@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use crate::database::RedisDatabase;
 use crate::commands::process_commands_after_rdb;
+use crate::database::ReplicationInfoValue;
 
 // Sends REPLCONF commands to the master after receiving the PING response
 pub fn send_replconf(
@@ -75,8 +76,8 @@ pub fn listen_for_master_commands(
             if let Ok(fullresync_str) = std::str::from_utf8(fullresync_message) {
                 if let Some((replid, offset)) = parse_fullresync(fullresync_str) {
                     let mut db_lock = db.lock().unwrap();
-                    db_lock.replication_info.insert("master_replid".to_string(), replid.clone());
-                    db_lock.replication_info.insert("master_repl_offset".to_string(), offset.clone());
+                    db_lock.replication_info.insert("master_replid".to_string(), ReplicationInfoValue::StringValue(replid.clone()));
+                    db_lock.replication_info.insert("master_repl_offset".to_string(), ReplicationInfoValue::StringValue(offset.clone()));
                     println!("Handled FULLRESYNC: replid = {}, offset = {}", replid, offset);
                     partial_message.drain(..fullresync_end + 2);
                 }
@@ -164,7 +165,7 @@ pub fn initialize_replication(
 
         {
             let mut db_lock = db.lock().unwrap();
-            db_lock.replication_info.insert("role".to_string(), "slave".to_string());
+            db_lock.replication_info.insert("role".to_string(), ReplicationInfoValue::StringValue("slave".to_string()));
             println!("Replication info updated to 'slave'.");
         }
 
@@ -187,9 +188,9 @@ pub fn initialize_replication(
         }
     } else {
         let mut db_lock = db.lock().unwrap();
-        db_lock.replication_info.insert("role".to_string(), "master".to_string());
-        db_lock.replication_info.insert("master_replid".to_string(), "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string());
-        db_lock.replication_info.insert("master_repl_offset".to_string(), "0".to_string());
+        db_lock.replication_info.insert("role".to_string(), ReplicationInfoValue::StringValue("master".to_string()));
+        db_lock.replication_info.insert("master_replid".to_string(), ReplicationInfoValue::StringValue("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string()));
+        db_lock.replication_info.insert("master_repl_offset".to_string(), ReplicationInfoValue::StringValue("0".to_string()));
         println!("Running as master.");
     }
 }

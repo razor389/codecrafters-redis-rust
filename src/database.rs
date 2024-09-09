@@ -2,10 +2,29 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::net::TcpStream;
+use std::fmt;
+
+// Define the enum to store either a String or a u32
+#[derive(Debug)]
+pub enum ReplicationInfoValue {
+    StringValue(String),
+    CommandBytes(u32), // Number of bytes worth of commands processed
+}
+
+// Implement the Display trait for ReplicationInfoValue
+impl fmt::Display for ReplicationInfoValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ReplicationInfoValue::StringValue(s) => write!(f, "{}", s),
+            ReplicationInfoValue::CommandBytes(bytes) => write!(f, "{} bytes", bytes),
+        }
+    }
+}
+
 pub struct RedisDatabase {
     pub data: HashMap<String, RedisValue>,
-    pub replication_info: HashMap<String, String>,
-    pub slave_connections: Vec<Arc<Mutex<TcpStream>>>, // Changed to store multiple slave connections as async TcpStream
+    pub replication_info: HashMap<String, ReplicationInfoValue>, // Changed to use the enum
+    pub slave_connections: Vec<Arc<Mutex<TcpStream>>>, // Changed to store multiple slave connections
 }
 
 impl RedisDatabase {
@@ -13,7 +32,7 @@ impl RedisDatabase {
         Self {
             data: HashMap::new(),
             replication_info: HashMap::new(),
-            slave_connections: vec![], // Initialize the replication info
+            slave_connections: vec![],
         }
     }
 
@@ -28,19 +47,29 @@ impl RedisDatabase {
     pub fn remove(&mut self, key: &str) {
         self.data.remove(key);
     }
+
+    // Update the replication info with either a string or a number
+    pub fn update_replication_info(&mut self, key: String, value: ReplicationInfoValue) {
+        self.replication_info.insert(key, value);
+    }
+
+    // Get replication info as a string (for display or logging)
+    pub fn get_replication_info(&self, key: &str) -> Option<&ReplicationInfoValue> {
+        self.replication_info.get(key)
+    }
 }
 
 #[derive(Debug)]
 enum TtlState {
-    Waiting(Duration), // TTL is active, and the key is waiting to expire
-    Expired,           // TTL has expired
+    Waiting(Duration),
+    Expired,
 }
 
 #[derive(Debug)]
 pub struct RedisValue {
     value: String,
     creation_time: Instant,
-    ttl_state: Option<TtlState>,  // TTL state, either None, Waiting, or Expired
+    ttl_state: Option<TtlState>,
 }
 
 impl RedisValue {
@@ -64,9 +93,6 @@ impl RedisValue {
         match self.ttl_state {
             Some(TtlState::Waiting(ttl)) => {
                 let elapsed = self.creation_time.elapsed();
-                println!("Debug: elapsed = {:?}", elapsed);
-                println!("Debug: ttl = {:?}", ttl);
-
                 elapsed >= ttl
             }
             Some(TtlState::Expired) => true,
@@ -78,4 +104,3 @@ impl RedisValue {
         &self.value
     }
 }
-
