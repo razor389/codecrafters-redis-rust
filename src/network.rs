@@ -45,6 +45,7 @@ fn handle_client(
     let mut partial_message = String::new();
 
     loop {
+        println!("Waiting for data...");
         let bytes_read = stream.read(&mut buffer)?;
 
         if bytes_read == 0 {
