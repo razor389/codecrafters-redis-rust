@@ -107,6 +107,7 @@ pub async fn listen_for_master_commands(
                 // Apply SET command to the slave's local database
                 if let Some(cmd) = command {
                     if cmd == "SET" && args.len() >= 2 {
+                        println!("Applying SET command from master: {} = {}", args[0], args[1]);
                         let key = args[0].clone();  // Access key
                         let value = args[1].clone();  // Access value
                         db_lock.insert(key, RedisValue::new(value, None));  // Insert into database
