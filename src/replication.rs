@@ -93,7 +93,6 @@ fn listen_for_master_commands(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabas
                 println!("Received RDB file of size: {}", rdb_data.len());
 
                 println!("RDB file received and processed.");
-                continue;
             }
         }
         // Handle Redis commands after the RDB is processed
