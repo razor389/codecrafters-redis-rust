@@ -47,93 +47,76 @@ pub async fn listen_for_master_commands(
     db: Arc<Mutex<RedisDatabase>>,
     config_map: &HashMap<String, String>,
 ) -> io::Result<()> {
-    let mut buffer = vec![0; 512]; // Buffer to store incoming data
+    let mut buffer = vec![0; 512];
     let mut partial_message = String::new();
-    let mut expecting_rdb = false;  // Track whether we are expecting an RDB file
-    let mut rdb_bulk_len = 0;       // Length of the RDB file to receive
+    let mut expecting_rdb = false;
+    let mut rdb_bulk_len = 0;
 
     loop {
-        // Read from the master
         let bytes_read = stream.read(&mut buffer).await?;
-
         if bytes_read == 0 {
-            // Master has closed the connection
             println!("Connection closed by master.");
             break;
         }
 
-        // Convert the response into a string to handle the command
         let message = String::from_utf8_lossy(&buffer[..bytes_read]);
         partial_message.push_str(&message);
 
-        // Handle FULLRESYNC and extract replid and offset
-        if partial_message.starts_with("+FULLRESYNC") {
-            if let Some((replid, offset)) = parse_fullresync(&partial_message) {
-                // Store master_replid and master_offset in the Redis database
-                {
-                    let mut db_lock = db.lock().await;
-                    db_lock.replication_info.insert("master_replid".to_string(), replid.to_string());
-                    db_lock.replication_info.insert("master_repl_offset".to_string(), offset.to_string());
-                }
-                println!("Received FULLRESYNC with replid: {} and offset: {}", replid, offset);
-                partial_message.clear();
-            }
-        }
-
-        // Handle the RDB file bulk string (starts with '$')
-        if partial_message.starts_with('$') && !expecting_rdb {
-            println!("Received bulk length: {}", partial_message);
-            if let Some(length) = parse_bulk_length(&partial_message) {
-                rdb_bulk_len = length;
-                expecting_rdb = true;
-                println!("Expecting RDB file of length: {}", rdb_bulk_len);
-            }
-            partial_message.clear();  // Clear the buffer after parsing bulk length
-        }
-
-        // If we're expecting an RDB file, process it
-        if expecting_rdb {
-            if let Some(rdb_data) = receive_bulk_string(stream, rdb_bulk_len).await? {
-                println!("Received RDB file, length: {}", rdb_data.len());
-                expecting_rdb = false;  // Finished receiving the RDB file
-                partial_message.clear();  // Clear the buffer
-                continue;  // Go to the next iteration to handle commands
-            }
-        }
-
-         // Handle "+OK\r\n" to send the PSYNC command
-         else if partial_message == "+OK\r\n" {
+        // Handle "+OK\r\n" to send the PSYNC command
+        if partial_message == "+OK\r\n" {
             println!("Received +OK from master. Sending PSYNC command...");
             stream
                 .write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n")
                 .await?;
             partial_message.clear(); // Clear after handling the +OK
+            continue;
         }
 
-        // Now handle Redis commands after the RDB file
-        while let Some(position) = partial_message.find("\r\n") {
-            // Extract one complete command from partial_message
-            let command_str = partial_message[..position + 2].to_string(); // Copy the command
-            partial_message = partial_message[position + 2..].to_string(); // Update the remaining part
+        // Handle FULLRESYNC
+        if partial_message.starts_with("+FULLRESYNC") {
+            if let Some((replid, offset)) = parse_fullresync(&partial_message) {
+                let mut db_lock = db.lock().await;
+                db_lock.replication_info.insert("master_replid".to_string(), replid.clone());
+                db_lock.replication_info.insert("master_repl_offset".to_string(), offset.clone());
+                println!("Handled FULLRESYNC: replid = {}, offset = {}", replid, offset);
+                partial_message.clear();
+            }
+        }
 
-            // If we have a complete Redis command, parse it
+        // Handle RDB file parsing
+        if partial_message.starts_with('$') && !expecting_rdb {
+            if let Some(length) = parse_bulk_length(&partial_message) {
+                rdb_bulk_len = length;
+                expecting_rdb = true;
+                partial_message.clear();
+                println!("Expecting RDB file of length: {}", rdb_bulk_len);
+            }
+        }
+
+        if expecting_rdb {
+            // Read the RDB file data
+            let rdb_data = receive_rdb_file(stream, rdb_bulk_len).await?;
+            println!("Received RDB file: {:?}", rdb_data);
+            expecting_rdb = false;
+            partial_message.clear();  // Clear the buffer after handling the RDB file
+            continue;
+        }
+
+        // Handle Redis commands after RDB
+        while let Some(position) = partial_message.find("\r\n") {
+            let command_str = partial_message[..position + 2].to_string();
+            partial_message = partial_message[position + 2..].to_string();
+
             if let Ok(mut db_lock) = db.try_lock() {
                 let (command, args, _) = parse_redis_message(&command_str, &mut db_lock, config_map);
-
-                // Log the command and response for debugging purposes
-                println!("Parsed command: {:?}, Args: {:?}", command, args);
-
-                // Apply SET command to the slave's local database
                 if let Some(cmd) = command {
                     if cmd == "SET" && args.len() >= 2 {
-                        let key = args[0].clone();  // Access key
-                        let value = args[1].clone();  // Access value
-                        db_lock.insert(key, RedisValue::new(value, None));  // Insert into database
-                        println!("Applied SET command from master: {} = {}", args[0], args[1]);
+                        let key = args[0].clone();
+                        let value = args[1].clone();
+                        db_lock.insert(key.clone(), RedisValue::new(value.clone(), None));
+                        println!("Applied SET command: {} = {}", key, value);
                     }
                 }
-            } else {
-                eprintln!("Failed to acquire lock for command processing.");
             }
         }
     }
@@ -155,31 +138,27 @@ fn parse_fullresync(message: &str) -> Option<(String, String)> {
 
 // Helper function to parse bulk length from the Redis message
 fn parse_bulk_length(message: &str) -> Option<usize> {
+    // We expect the bulk string to start with '$' followed by the length
     if message.starts_with('$') {
-        if let Ok(length) = message[1..].trim().parse::<usize>() {
-            Some(length)
-        } else {
-            None
+        let parts: Vec<&str> = message.split("\r\n").collect();
+        if parts.len() > 1 {
+            if let Ok(length) = parts[0][1..].parse::<usize>() {
+                return Some(length);
+            }
         }
-    } else {
-        None
     }
+    None
 }
 
-// Helper function to receive bulk strings like the RDB file
-pub async fn receive_bulk_string(
+pub async fn receive_rdb_file(
     stream: &mut TcpStream,
     length: usize,
-) -> io::Result<Option<Vec<u8>>> {
+) -> io::Result<Vec<u8>> {
     let mut buffer = vec![0; length];
-    let bytes_read = stream.read_exact(&mut buffer).await?;
-    if bytes_read == length {
-        Ok(Some(buffer))
-    } else {
-        Ok(None)
-    }
+    stream.read_exact(&mut buffer).await?;  // Ensure we read exactly the length of the RDB file
+    println!("Received RDB file of length: {}", length);
+    Ok(buffer)
 }
-
 
 // Initializes replication settings, determining whether this server is a master or slave
 pub async fn initialize_replication(
