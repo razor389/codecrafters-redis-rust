@@ -2,8 +2,8 @@ use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use crate::database::{RedisDatabase, RedisValue};
-use crate::parsing::parse_redis_message;
+use crate::database::RedisDatabase;
+use crate::commands::process_commands_after_rdb;
 
 // Sends REPLCONF commands to the master after receiving the PING response
 pub fn send_replconf(
@@ -79,7 +79,7 @@ pub fn listen_for_master_commands(
         // Handle RDB file parsing
         if partial_message.starts_with('$') && !received_rdb {
             println!("Received RDB File: {}", partial_message);
-            if let Some(length) = parse_bulk_length(&partial_message) {
+            if let Some(_length) = parse_bulk_length(&partial_message) {
                 received_rdb = true;
                 partial_message.clear();  // Clear the bulk length header but keep the rest
             }
@@ -92,48 +92,6 @@ pub fn listen_for_master_commands(
     }
     Ok(())
 }
-
-// Processes Redis commands after the RDB file has been received
-fn process_commands_after_rdb(
-    partial_message: &mut String,
-    db: Arc<Mutex<RedisDatabase>>,
-    config_map: &HashMap<String, String>,
-    stream: &mut TcpStream,  // Added to send a response back to master
-) -> io::Result<()> {
-    let mut db_lock = db.lock().unwrap();
-
-    // Parse the Redis message and handle the parsed commands
-    let parsed_results = parse_redis_message(&partial_message, &mut db_lock, config_map);
-
-    for (command, args, response, consumed_length) in parsed_results {
-        // Remove the processed part from the partial message
-        partial_message.drain(..consumed_length);
-        println!("partial_message after drain: {}", partial_message);
-
-        if let Some(cmd) = command {
-            match cmd.as_str() {
-                "SET" => {
-                    if args.len() >= 2 {
-                        let key = args[0].clone();
-                        let value = args[1].clone();
-                        db_lock.insert(key.clone(), RedisValue::new(value.clone(), None));
-                        println!("Applied SET command: {} = {}", key, value);
-                    }
-                },
-                "REPLCONF" => {
-                    // Handle REPLCONF commands
-                    println!("REPLCONF command received, responding with: {}", response);
-                    stream.write_all(response.as_bytes())?;
-                },
-                // Handle other commands as needed
-                _ => println!("Unknown command: {}", cmd),
-            }
-        }
-    }
-
-    Ok(())
-}
-
 
 // Helper function to parse the FULLRESYNC command and extract replid and offset
 fn parse_fullresync(message: &str) -> Option<(String, String)> {
@@ -149,7 +107,6 @@ fn parse_fullresync(message: &str) -> Option<(String, String)> {
 
 // Helper function to parse bulk length from the Redis message
 fn parse_bulk_length(message: &str) -> Option<usize> {
-    println!("message: {:}", message);
     if message.starts_with('$') {
         let parts: Vec<&str> = message.split("\r\n").collect();
         if parts.len() > 1 {

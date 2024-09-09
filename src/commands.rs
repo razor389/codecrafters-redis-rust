@@ -1,7 +1,9 @@
 use crate::database::{RedisDatabase, RedisValue};
+use crate::parsing::parse_redis_message;
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::net::TcpStream;
+use std::sync::{Arc, Mutex};
 
 // Handle the SET command
 pub fn handle_set(db: &mut RedisDatabase, args: &[String]) -> String {
@@ -151,4 +153,45 @@ fn hex_to_bytes(hex: &str) -> Vec<u8> {
     }
 
     bytes
+}
+
+// Processes Redis commands after the RDB file has been received
+pub fn process_commands_after_rdb(
+    partial_message: &mut String,
+    db: Arc<Mutex<RedisDatabase>>,
+    config_map: &HashMap<String, String>,
+    stream: &mut TcpStream,  // Added to send a response back to master
+) -> io::Result<()> {
+    let mut db_lock = db.lock().unwrap();
+
+    // Parse the Redis message and handle the parsed commands
+    let parsed_results = parse_redis_message(&partial_message, &mut db_lock, config_map);
+
+    for (command, args, response, consumed_length) in parsed_results {
+        // Remove the processed part from the partial message
+        partial_message.drain(..consumed_length);
+        println!("partial_message after drain: {}", partial_message);
+
+        if let Some(cmd) = command {
+            match cmd.as_str() {
+                "SET" => {
+                    if args.len() >= 2 {
+                        let key = args[0].clone();
+                        let value = args[1].clone();
+                        db_lock.insert(key.clone(), RedisValue::new(value.clone(), None));
+                        println!("Applied SET command: {} = {}", key, value);
+                    }
+                },
+                "REPLCONF" => {
+                    // Handle REPLCONF commands
+                    println!("REPLCONF command received, responding with: {}", response);
+                    stream.write_all(response.as_bytes())?;
+                },
+                // Handle other commands as needed
+                _ => println!("Unknown command: {}", cmd),
+            }
+        }
+    }
+
+    Ok(())
 }
