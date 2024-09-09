@@ -32,13 +32,8 @@ pub async fn send_replconf(
     let response = String::from_utf8_lossy(&buffer[..bytes_read]);
 
     if response.contains("+OK") {
-        println!("Received +OK from master, proceeding with PSYNC");
-
-        // Send PSYNC command to the master after receiving +OK
-        stream.write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n").await?;
-        println!("Sent PSYNC command");
-
-        // Keep listening for further commands from the master and pass the db for command execution
+        println!("Received +OK from master. Waiting for FULLRESYNC or CONTINUE.");
+        // Keep listening for further commands from the master
         listen_for_master_commands(stream, db, config_map).await?;
     } else {
         println!("Unexpected response from master: {}", response);
@@ -69,10 +64,10 @@ pub async fn listen_for_master_commands(
         let message = String::from_utf8_lossy(&buffer[..bytes_read]);
         println!("Received message from master: {}", message);
 
-        // Check for FULLRESYNC message
-        if message.starts_with("+FULLRESYNC") {
+        // Check for FULLRESYNC or CONTINUE message before sending PSYNC
+        if message.starts_with("+FULLRESYNC") || message.starts_with("+CONTINUE") {
             let parts: Vec<&str> = message.split_whitespace().collect();
-            if parts.len() >= 3 {
+            if message.starts_with("+FULLRESYNC") && parts.len() >= 3 {
                 let master_replid = parts[1];
                 let master_offset = parts[2];
 
@@ -85,7 +80,8 @@ pub async fn listen_for_master_commands(
                     db_lock.replication_info.insert("master_repl_offset".to_string(), master_offset.to_string());
                 }
 
-                println!("Waiting for the RDB file...");
+                println!("Proceeding with PSYNC...");
+                stream.write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n").await?;
             }
         }
         // Handle RDB file as a bulk string (starts with $)
@@ -111,9 +107,9 @@ pub async fn listen_for_master_commands(
                 // Log the command and response for debugging purposes
                 println!("Parsed command: {:?}, Response: {}", command, response);
 
-                // Only send responses back for certain commands (e.g., PSYNC, SET, GET)
+                // Only send responses back for certain commands (e.g., SET, GET)
                 if let Some(cmd) = command {
-                    if cmd == "PSYNC" || cmd == "SET" || cmd == "GET" {
+                    if cmd == "SET" || cmd == "GET" {
                         stream.write_all(response.as_bytes()).await?;
                     }
                 }
@@ -159,7 +155,7 @@ pub async fn initialize_replication(
                 match stream.read(&mut buffer).await {
                     Ok(_) => {
                         println!("Received PING response from master");
-                        // Send REPLCONF commands and PSYNC, using the dynamically provided port
+                        // Send REPLCONF commands, using the dynamically provided port
                         let _ = send_replconf(&mut stream, port, db.clone(), config_map).await;
                     }
                     Err(e) => eprintln!("Failed to receive PING response: {}", e),
