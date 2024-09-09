@@ -87,7 +87,7 @@ pub fn listen_for_master_commands(
 
         // Process Redis commands after RDB has been received
         if received_rdb {
-            process_commands_after_rdb(&mut partial_message, db.clone(), config_map)?;
+            process_commands_after_rdb(&mut partial_message, db.clone(), config_map, stream)?;
         }
     }
     Ok(())
@@ -98,13 +98,14 @@ fn process_commands_after_rdb(
     partial_message: &mut String,
     db: Arc<Mutex<RedisDatabase>>,
     config_map: &HashMap<String, String>,
+    stream: &mut TcpStream,  // Added to send a response back to master
 ) -> io::Result<()> {
     let mut db_lock = db.lock().unwrap();
 
     // Parse the Redis message and handle the parsed commands
     let parsed_results = parse_redis_message(&partial_message, &mut db_lock, config_map);
-    
-    for (command, args, _response, consumed_length) in parsed_results {
+
+    for (command, args, response, consumed_length) in parsed_results {
         // Remove the processed part from the partial message
         partial_message.drain(..consumed_length);
         println!("partial_message after drain: {}", partial_message);
@@ -119,6 +120,11 @@ fn process_commands_after_rdb(
                         println!("Applied SET command: {} = {}", key, value);
                     }
                 },
+                "REPLCONF" => {
+                    // Handle REPLCONF commands
+                    println!("REPLCONF command received, responding with: {}", response);
+                    stream.write_all(response.as_bytes())?;
+                },
                 // Handle other commands as needed
                 _ => println!("Unknown command: {}", cmd),
             }
@@ -127,6 +133,7 @@ fn process_commands_after_rdb(
 
     Ok(())
 }
+
 
 // Helper function to parse the FULLRESYNC command and extract replid and offset
 fn parse_fullresync(message: &str) -> Option<(String, String)> {

@@ -88,9 +88,17 @@ pub fn handle_info(db: &RedisDatabase, args: &[String]) -> String {
 }
 
 // Handle the REPLCONF command
-pub fn handle_replconf(_args: &[String]) -> String {
-    "+OK\r\n".to_string()  
+// Handle the REPLCONF command
+pub fn handle_replconf(args: &[String]) -> String {
+    if args.len() == 2 && args[0].to_uppercase() == "GETACK" && args[1] == "*" {
+        // If the command is "REPLCONF GETACK *", respond with "REPLCONF ACK 0"
+        "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n".to_string()
+    } else {
+        // Otherwise, respond with +OK
+        "+OK\r\n".to_string()
+    }
 }
+
 
 // Handle the PSYNC command
 pub fn handle_psync(db: &RedisDatabase, args: &[String]) -> String {
