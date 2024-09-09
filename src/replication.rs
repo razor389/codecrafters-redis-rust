@@ -46,6 +46,7 @@ pub fn listen_for_master_commands(
     let mut buffer = vec![0; 512];
     let mut partial_message = String::new();
     let mut received_rdb = false;
+    let mut remaining_bulk_bytes = 0;
 
     loop {
         let bytes_read = stream.read(&mut buffer)?;
@@ -78,10 +79,38 @@ pub fn listen_for_master_commands(
 
         // Handle RDB file parsing
         if partial_message.starts_with('$') && !received_rdb {
-            println!("Received RDB File: {}", partial_message);
-            if let Some(_length) = parse_bulk_length(&partial_message) {
+            if let Some(bulk_length) = parse_bulk_length(&partial_message) {
+                // Remove the bulk string header ($<length>\r\n)
+                let header_size = partial_message.find("\r\n").unwrap() + 2; // +2 for \r\n
+                partial_message.drain(..header_size);
+
+                // Set the number of bytes to expect in the bulk string body
+                remaining_bulk_bytes = bulk_length;
+
+                // If the current buffer contains the complete RDB file, remove the corresponding bytes
+                if partial_message.len() >= remaining_bulk_bytes {
+                    partial_message.drain(..remaining_bulk_bytes);
+                    remaining_bulk_bytes = 0;
+                    received_rdb = true;
+                    println!("RDB file fully received and processed.");
+                } else {
+                    // Wait for the rest of the bulk string body to arrive in subsequent reads
+                    continue;
+                }
+            }
+        }
+
+        // If there are remaining bulk bytes, we wait for more data
+        if remaining_bulk_bytes > 0 {
+            // Consume the remaining bulk string bytes as they arrive
+            if partial_message.len() >= remaining_bulk_bytes {
+                partial_message.drain(..remaining_bulk_bytes);
+                remaining_bulk_bytes = 0;
                 received_rdb = true;
-                partial_message.clear();  // Clear the bulk length header but keep the rest
+                println!("Remaining RDB bytes fully received.");
+            } else {
+                // Not enough data, wait for more in the next read
+                continue;
             }
         }
 
