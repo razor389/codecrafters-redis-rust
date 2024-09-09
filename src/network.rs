@@ -71,26 +71,51 @@ async fn handle_client(
                 parse_redis_message(&current_message, &mut db_lock, config_map)
             };
 
-            {
-                let mut locked_stream = stream.lock().await;
-                // Write the response to the client
-                locked_stream.write_all(response.as_bytes()).await?;
-                locked_stream.flush().await?;
-            }
+            if response.starts_with("+FULLRESYNC") {
+                {
+                    let mut locked_stream = stream.lock().await;
+                    // Send the FULLRESYNC response first
+                    locked_stream.write_all(response.as_bytes()).await?;
+                    locked_stream.flush().await?;
+                }
 
-            // Forward the command to all connected slaves if applicable
-            if let Some(cmd) = command {
-                if should_forward_to_slaves(&cmd) {
-                    let slaves = {
-                        // Acquire lock briefly to get slave connections
-                        let db_lock = db.lock().await;
-                        db_lock.slave_connections.clone()
-                    };
-                    for slave_connection in slaves {
-                        let mut slave_stream = slave_connection.lock().await;
-                        println!("Forwarding message to slave: {}", current_message);
-                        slave_stream.write_all(current_message.as_bytes()).await?;
-                        slave_stream.flush().await?;
+                // Send the RDB file to the client (slave)
+                {
+                    let mut locked_stream = stream.lock().await;
+                    send_rdb_file(&mut *locked_stream).await?;
+                }
+
+                println!("Sent RDB file after FULLRESYNC");
+
+                // Add the slave connection to the list of slaves
+                {
+                    let mut db_lock = db.lock().await;
+                    db_lock.slave_connections.push(Arc::clone(&stream));  // Reuse the same stream using Arc
+                }
+                println!("Added new slave after FULLRESYNC");
+
+            } else {
+                // Write the response to the client
+                {
+                    let mut locked_stream = stream.lock().await;
+                    locked_stream.write_all(response.as_bytes()).await?;
+                    locked_stream.flush().await?;
+                }
+
+                // Forward the command to all connected slaves if applicable
+                if let Some(cmd) = command {
+                    if should_forward_to_slaves(&cmd) {
+                        let slaves = {
+                            // Acquire lock briefly to get slave connections
+                            let db_lock = db.lock().await;
+                            db_lock.slave_connections.clone()
+                        };
+                        for slave_connection in slaves {
+                            let mut slave_stream = slave_connection.lock().await;
+                            println!("Forwarding message to slave: {}", current_message);
+                            slave_stream.write_all(current_message.as_bytes()).await?;
+                            slave_stream.flush().await?;
+                        }
                     }
                 }
             }
