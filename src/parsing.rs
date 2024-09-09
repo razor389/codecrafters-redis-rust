@@ -107,19 +107,23 @@ pub fn parse_redis_message(
             // Calculate the byte length of the entire command
             let byte_length = cursor - initial_cursor;
             // Incrementally update the bytes_processed
-            let cmd_bytes = match db.get_replication_info("slave_repl_offset") {
-                Some(ReplicationInfoValue::ByteValue(current_bytes)) => {
-                    current_bytes + byte_length
+            if let Some(ReplicationInfoValue::StringValue(role)) = db.get_replication_info("role") {
+                if role == "slave" {
+                    let cmd_bytes = match db.get_replication_info("slave_repl_offset") {
+                        Some(ReplicationInfoValue::ByteValue(current_bytes)) => {
+                            current_bytes + byte_length
+                        }
+                        _ => byte_length,  // Initialize if not present
+                    };
+            
+                    // Update the replication info in the database
+                    db.update_replication_info(
+                        "slave_repl_offset".to_string(),
+                        ReplicationInfoValue::ByteValue(cmd_bytes),
+                    );
                 }
-                _ => byte_length,  // Initialize if not present
-            };
-
-            // Update the replication info in the database
-            db.update_replication_info(
-                "slave_repl_offset".to_string(),
-                ReplicationInfoValue::ByteValue(cmd_bytes),
-            );
-
+            }
+            
             //println!("Updated bytes_processed to: {}", cmd_bytes);
 
             // Push the result (command, args, response, cursor, byte_length)
