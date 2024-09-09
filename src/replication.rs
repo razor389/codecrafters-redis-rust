@@ -77,7 +77,6 @@ pub fn listen_for_master_commands(
                 }
             }
         }
-        println!("got here");
 
         // Handle RDB file parsing (bulk string)
         if !received_rdb && partial_message.starts_with(b"$") {
