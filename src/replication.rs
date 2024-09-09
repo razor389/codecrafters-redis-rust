@@ -87,7 +87,6 @@ pub fn listen_for_master_commands(
 
         // Process Redis commands after RDB has been received
         if received_rdb {
-            println!("partial message: {}", partial_message);
             process_commands_after_rdb(&mut partial_message, db.clone(), config_map, stream)?;
         }
     }
