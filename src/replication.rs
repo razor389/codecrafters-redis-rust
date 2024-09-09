@@ -91,19 +91,28 @@ pub async fn listen_for_master_commands(
             }
         }
 
-        if received_rdb {
-            // Process commands after RDB file reception
-            println!("Partial message: {}", partial_message);
+        // Process Redis commands after RDB has been received
+        if received_rdb{
+            while !partial_message.is_empty() {
+                if let Some((command, args, response, consumed_length)) = process_complete_redis_message(&partial_message, &db, config_map).await {
+                    // Remove the processed part from the partial message
+                    partial_message.drain(..consumed_length);
 
-            // Process each RESP message in the buffer
-            while let Some((command, args, _)) = process_complete_redis_message(&mut partial_message, &db, config_map).await {
-                if let Some(cmd) = command {
-                    if cmd == "SET" && args.len() >= 2 {
-                        let key = args[0].clone();
-                        let value = args[1].clone();
-                        db.lock().await.insert(key.clone(), RedisValue::new(value.clone(), None));  // Insert cloned key and value
-                        println!("Applied SET command: {} = {}", key, value);
+                    if let Some(cmd) = command {
+                        if cmd == "SET" && args.len() >= 2 {
+                            let key = args[0].clone();
+                            let value = args[1].clone();
+                            db.lock().await.insert(key.clone(), RedisValue::new(value.clone(), None));
+                            println!("Applied SET command: {} = {}", key, value);
+                        }
                     }
+
+                    if !response.is_empty() {
+                        stream.write_all(response.as_bytes()).await?;
+                    }
+                } else {
+                    // If we don't have a complete message, break the loop and wait for more data
+                    break;
                 }
             }
         }
@@ -111,26 +120,26 @@ pub async fn listen_for_master_commands(
     Ok(())
 }
 
-// Helper function to process complete RESP messages
+// Function to process complete Redis messages
 async fn process_complete_redis_message(
-    partial_message: &mut String,
+    partial_message: &str,
     db: &Arc<Mutex<RedisDatabase>>,
     config_map: &HashMap<String, String>,
-) -> Option<(Option<String>, Vec<String>, String)> {
+) -> Option<(Option<String>, Vec<String>, String, usize)> {
     let mut db_lock = db.lock().await;
 
-    // Check if there is a complete Redis message to process
+    // Parse the Redis message, return the command, args, response, and how much was consumed
     if let (command, args, response) = parse_redis_message(partial_message, &mut db_lock, config_map) {
-        // If command is None, there wasn't a complete message
-        if command.is_some() {
-            // Drain the processed part of the partial message
-            *partial_message = partial_message[response.len()..].to_string();
-            return Some((command, args, response));
-        }
+        // Calculate how much of the message was consumed by this command
+        let consumed_length = partial_message.len(); // Adjust this based on the command parsing
+
+        // Return the parsed command, arguments, response, and the length of the consumed message
+        return Some((command, args, response, consumed_length));
     }
-    
+
     None
 }
+
 
 // Helper function to parse the FULLRESYNC command and extract replid and offset
 fn parse_fullresync(message: &str) -> Option<(String, String)> {
