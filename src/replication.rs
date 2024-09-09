@@ -50,7 +50,6 @@ pub async fn listen_for_master_commands(
     let mut buffer = vec![0; 512];
     let mut partial_message = String::new();
     let mut received_rdb = false;
-    let mut rdb_bulk_len = 0;
 
     loop {
         let bytes_read = stream.read(&mut buffer).await?;
@@ -86,8 +85,7 @@ pub async fn listen_for_master_commands(
         // Handle RDB file parsing
         if partial_message.starts_with('$') && !received_rdb {
             println!("Received RDB File: {}", partial_message);
-            if let Some(length) = parse_bulk_length(&partial_message) {
-                rdb_bulk_len = length;
+            if let Some(_) = parse_bulk_length(&partial_message) {
                 received_rdb = true;
                 partial_message.clear();  // Clear the bulk length header but keep the rest
             }
@@ -98,7 +96,7 @@ pub async fn listen_for_master_commands(
             println!("Partial message: {}", partial_message);
 
             // Process each RESP message in the buffer
-            while let Some((command, args, response)) = process_complete_redis_message(&mut partial_message, &db, config_map).await {
+            while let Some((command, args, _)) = process_complete_redis_message(&mut partial_message, &db, config_map).await {
                 if let Some(cmd) = command {
                     if cmd == "SET" && args.len() >= 2 {
                         let key = args[0].clone();
@@ -106,11 +104,6 @@ pub async fn listen_for_master_commands(
                         db.lock().await.insert(key.clone(), RedisValue::new(value.clone(), None));  // Insert cloned key and value
                         println!("Applied SET command: {} = {}", key, value);
                     }
-                }
-
-                // If there's a response that needs to be sent, write it to the master
-                if !response.is_empty() {
-                    stream.write_all(response.as_bytes()).await?;
                 }
             }
         }
