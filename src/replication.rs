@@ -80,8 +80,7 @@ pub async fn listen_for_master_commands(
                     db_lock.replication_info.insert("master_repl_offset".to_string(), master_offset.to_string());
                 }
 
-                println!("Proceeding with PSYNC...");
-                stream.write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n").await?;
+                
             }
         }
         // Handle RDB file as a bulk string (starts with $)
@@ -97,6 +96,8 @@ pub async fn listen_for_master_commands(
             println!("Received command from master: {}", message);
 
             if message == "+OK\r\n" {
+                println!("Proceeding with PSYNC...");
+                stream.write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n").await?;
                 continue; // Ignore PING responses
             }
 
