@@ -162,7 +162,7 @@ pub fn process_commands_after_rdb(
     stream: &mut TcpStream,  // Added to send a response back to master
 ) -> io::Result<()> {
     let mut db_lock = db.lock().unwrap();
-
+    println!("processing message: {}", partial_message);
     // Parse the Redis message and handle the parsed commands
     let parsed_results = parse_redis_message(&partial_message, &mut db_lock, config_map);
     println!("parsed results: {:?}", parsed_results);
