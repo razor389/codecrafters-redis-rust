@@ -93,8 +93,14 @@ pub fn handle_info(db: &RedisDatabase, args: &[String]) -> String {
 // Handle the REPLCONF command
 pub fn handle_replconf(db: &RedisDatabase, args: &[String]) -> String {
     if args.len() == 2 && args[0].to_uppercase() == "GETACK" && args[1] == "*" {
-        // If the command is "REPLCONF GETACK *", respond with "REPLCONF ACK 0"
-        "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n".to_string()
+        // Retrieve the value of "bytes_processed" from the replication info
+        let bytes_processed = match db.get_replication_info("bytes_processed") {
+            Some(ReplicationInfoValue::CommandBytes(bytes)) => *bytes,  // Dereference to get the usize value
+            _ => 0,  // Default to 0 if not found
+        };
+
+        // Respond with "REPLCONF ACK <bytes_processed>"
+        format!("*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n${}\r\n{}\r\n", bytes_processed.to_string().len(), bytes_processed)
     } else {
         // Otherwise, respond with +OK
         "+OK\r\n".to_string()
