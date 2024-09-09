@@ -196,7 +196,7 @@ pub fn initialize_replication(
             // If the master_repl_offset doesn't exist, initialize it to 0
             db_lock.replication_info.insert(
                 "master_repl_offset".to_string(),
-                ReplicationInfoValue::StringValue("0".to_string())
+                ReplicationInfoValue::ByteValue(0)
             );
         }
         println!("Running as master.");

@@ -118,21 +118,21 @@ fn handle_client(
                             // Increment the master_repl_offset in replication_info
                             if let Some(ReplicationInfoValue::StringValue(offset_str)) = db_lock.replication_info.get("master_repl_offset") {
                                 // Parse the current offset from the string
-                                if let Ok(current_offset) = offset_str.parse::<u64>() {
+                                if let Ok(current_offset) = offset_str.parse::<usize>() {
                                     // Increment the offset by the number of bytes sent
-                                    let new_offset = current_offset + bytes_sent as u64;
+                                    let new_offset = current_offset + bytes_sent as usize;
 
                                     // Update the replication_info with the new offset as a string
                                     db_lock.replication_info.insert(
                                         "master_repl_offset".to_string(),
-                                        ReplicationInfoValue::StringValue(new_offset.to_string())
+                                        ReplicationInfoValue::ByteValue(new_offset)
                                     );
                                 }
                             } else {
                                 // If the master_repl_offset does not exist or is not a StringValue, initialize it
                                 db_lock.replication_info.insert(
                                     "master_repl_offset".to_string(),
-                                    ReplicationInfoValue::StringValue(bytes_sent.to_string())
+                                    ReplicationInfoValue::ByteValue(bytes_sent)
                                 );
                             }
 
