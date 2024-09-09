@@ -95,6 +95,7 @@ pub async fn listen_for_master_commands(
 
         if received_rdb {
             // Handle Redis commands after RDB processing
+            println!("Partial message: {}", partial_message);
             while let Some(position) = partial_message.find("\r\n") {
                 let command_str = partial_message[..position + 2].to_string();
                 partial_message = partial_message[position + 2..].to_string();  // Retain the rest of the message
