@@ -88,15 +88,24 @@ pub fn listen_for_master_commands(
                 // Set the number of bytes to expect in the bulk string body
                 remaining_bulk_bytes = bulk_length;
 
-                // If the current buffer contains the complete RDB file, remove the corresponding bytes
+                // Spin until the entire bulk string (RDB file) is received
+                while partial_message.len() < remaining_bulk_bytes {
+                    // Read more data from the stream until we have enough to process the entire RDB file
+                    let bytes_read = stream.read(&mut buffer)?;
+                    if bytes_read == 0 {
+                        println!("Connection closed by master.");
+                        break;
+                    }
+                    let additional_message = String::from_utf8_lossy(&buffer[..bytes_read]);
+                    partial_message.push_str(&additional_message);
+                }
+
+                // Now drain the entire bulk string corresponding to the RDB file
                 if partial_message.len() >= remaining_bulk_bytes {
                     partial_message.drain(..remaining_bulk_bytes);
                     remaining_bulk_bytes = 0;
                     received_rdb = true;
                     println!("RDB file fully received and processed.");
-                } else {
-                    // Wait for the rest of the bulk string body to arrive in subsequent reads
-                    continue;
                 }
             }
         }
