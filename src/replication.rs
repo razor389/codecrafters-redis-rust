@@ -149,7 +149,7 @@ fn parse_fullresync(message: &str) -> Option<(String, String)> {
 
 // Helper function to parse bulk length from the Redis message
 fn parse_bulk_length(message: &str) -> Option<usize> {
-    println!("message: {}", message);
+    println!("message: {:?}", message);
     if message.starts_with('$') {
         let parts: Vec<&str> = message.split("\r\n").collect();
         if parts.len() > 1 {
