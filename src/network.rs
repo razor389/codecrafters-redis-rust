@@ -49,6 +49,7 @@ fn handle_client(
         let bytes_read = stream.read(&mut buffer)?;
 
         if bytes_read == 0 {
+            println!("Connection closed by client.");
             break; // Connection closed by client
         }
 
