@@ -79,7 +79,8 @@ pub fn listen_for_master_commands(
         // Handle RDB file parsing
         if partial_message.starts_with('$') && !received_rdb {
             println!("Received RDB File: {}", partial_message);
-            if let Some(_) = parse_bulk_length(&partial_message) {
+            if let Some(length) = parse_bulk_length(&partial_message) {
+                println!("length {}", length);
                 received_rdb = true;
                 partial_message.clear();  // Clear the bulk length header but keep the rest
             }
