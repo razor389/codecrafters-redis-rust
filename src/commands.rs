@@ -216,22 +216,6 @@ pub fn process_commands_after_rdb(
                 },
                 _ => println!("Unknown command: {}", cmd),
             }
-
-            // Update replication info for the number of bytes processed
-            let cmd_bytes = match db_lock.get_replication_info("bytes_processed") {
-                Some(ReplicationInfoValue::CommandBytes(current_bytes)) => {
-                    current_bytes + command_msg_length_bytes
-                }
-                _ => command_msg_length_bytes,  // Initialize if not present
-            };
-
-            // Update the replication info in the database
-            db_lock.update_replication_info(
-                "bytes_processed".to_string(),
-                ReplicationInfoValue::CommandBytes(cmd_bytes),
-            );
-
-            println!("Updated bytes_processed to: {}", cmd_bytes);
         }
     }
 

@@ -1,4 +1,4 @@
-use crate::database::RedisDatabase;
+use crate::database::{RedisDatabase, ReplicationInfoValue};
 use crate::commands::{handle_set, handle_get, handle_config, handle_keys, handle_echo, handle_ping, handle_info, handle_replconf, handle_psync};
 use std::collections::HashMap;
 
@@ -105,6 +105,21 @@ pub fn parse_redis_message(
 
             // Calculate the byte length of the entire command
             let byte_length = cursor - initial_cursor;
+            // Incrementally update the bytes_processed
+            let cmd_bytes = match db.get_replication_info("bytes_processed") {
+                Some(ReplicationInfoValue::CommandBytes(current_bytes)) => {
+                    current_bytes + byte_length
+                }
+                _ => byte_length,  // Initialize if not present
+            };
+
+            // Update the replication info in the database
+            db.update_replication_info(
+                "bytes_processed".to_string(),
+                ReplicationInfoValue::CommandBytes(cmd_bytes),
+            );
+
+            println!("Updated bytes_processed to: {}", cmd_bytes);
 
             // Push the result (command, args, response, cursor, byte_length)
             results.push((command, args, response, cursor, byte_length));
