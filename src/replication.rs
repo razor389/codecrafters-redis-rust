@@ -99,6 +99,7 @@ pub async fn listen_for_master_commands(
                     // Remove the processed part from the partial message
                     partial_message.drain(..consumed_length);
                     println!("partial_message after drain: {}", partial_message);
+                    
                     if let Some(cmd) = command {
                         if cmd == "SET" && args.len() >= 2 {
                             let key = args[0].clone();
@@ -113,6 +114,7 @@ pub async fn listen_for_master_commands(
                     break;
                 }
             }
+
         }
     }
     Ok(())
@@ -127,16 +129,14 @@ async fn process_complete_redis_message(
     let mut db_lock = db.lock().await;
 
     // Parse the Redis message, return the command, args, response, and how much was consumed
-    if let (command, args, response) = parse_redis_message(partial_message, &mut db_lock, config_map) {
-        // Calculate how much of the message was consumed by this command
-        let consumed_length = partial_message.len(); // Adjust this based on the command parsing
-
+    if let (command, args, response, consumed_length) = parse_redis_message(partial_message, &mut db_lock, config_map) {
         // Return the parsed command, arguments, response, and the length of the consumed message
         return Some((command, args, response, consumed_length));
     }
 
     None
 }
+
 
 
 // Helper function to parse the FULLRESYNC command and extract replid and offset

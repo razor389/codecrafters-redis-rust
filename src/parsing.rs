@@ -7,26 +7,33 @@ pub fn parse_redis_message(
     message: &str,
     db: &mut RedisDatabase,
     config_map: &HashMap<String, String>,
-) -> (Option<String>, Vec<String>, String) {
+) -> (Option<String>, Vec<String>, String, usize) {
     let mut lines = message.lines();
     let mut command = None;
     let mut args = Vec::new();
     let mut arg_count = 0;
+    let mut consumed_length = 0;
 
     if let Some(line) = lines.next() {
+        consumed_length += line.len() + 2;  // Include \r\n
+
         if line.starts_with('*') {
             // Parse the argument count
             if let Ok(count) = line[1..].parse::<usize>() {
                 arg_count = count;
             } else {
-                return (None, vec![], "-ERR invalid argument count\r\n".to_string());
+                return (None, vec![], "-ERR invalid argument count\r\n".to_string(), consumed_length);
             }
 
             // Parse the bulk strings (arguments) in RESP format
             while let Some(line) = lines.next() {
+                consumed_length += line.len() + 2;  // Include \r\n
+
                 if line.starts_with('$') {
                     // Expecting a bulk string length, skip over it to the next line
                     if let Some(arg) = lines.next() {
+                        consumed_length += arg.len() + 2;  // Include \r\n
+
                         if command.is_none() {
                             // First argument is the command
                             command = Some(arg.to_uppercase());
@@ -40,7 +47,7 @@ pub fn parse_redis_message(
 
             // Ensure the number of arguments matches the declared count
             if args.len() + 1 != arg_count {
-                return (command, args, "-ERR argument count mismatch\r\n".to_string());
+                return (command, args, "-ERR argument count mismatch\r\n".to_string(), consumed_length);
             }
 
             // Debug output for parsed command and arguments
@@ -60,11 +67,11 @@ pub fn parse_redis_message(
                 _ => "-ERR unknown command\r\n".to_string(),
             };
 
-            return (command, args, response);  // Return parsed command, args, and response
+            return (command, args, response, consumed_length);  // Return parsed command, args, response, and consumed length
         } else {
-            return (None, vec![], "-ERR invalid format\r\n".to_string());
+            return (None, vec![], "-ERR invalid format\r\n".to_string(), consumed_length);
         }
     } else {
-        return (None, vec![], "-ERR empty message\r\n".to_string());
+        return (None, vec![], "-ERR empty message\r\n".to_string(), consumed_length);
     }
 }
