@@ -10,12 +10,11 @@ pub fn parse_redis_message(
 ) -> Vec<(Option<String>, Vec<String>, String, usize)> {
     let mut lines = message.lines();
     let mut results = Vec::new();
-    let mut partial_message = String::new();
-    println!("parsing message {}", message);
+    println!("Parsing message: {}", message);
+    
     while let Some(line) = lines.next() {
         let mut command = None;
         let mut args = Vec::new();
-        #[allow(unused_assignments)]
         let mut arg_count = 0;
         let mut consumed_length = 0;
 
@@ -31,26 +30,42 @@ pub fn parse_redis_message(
             }
 
             // Parse the bulk strings (arguments) in RESP format
-            while let Some(line) = lines.next() {
-                consumed_length += line.len() + 2;  // Include \r\n
+            for _ in 0..arg_count {
+                if let Some(bulk_length_line) = lines.next() {
+                    consumed_length += bulk_length_line.len() + 2;  // Include \r\n
 
-                if line.starts_with('$') {
-                    // Expecting a bulk string length, skip over it to the next line
-                    if let Some(arg) = lines.next() {
-                        consumed_length += arg.len() + 2;  // Include \r\n
+                    if bulk_length_line.starts_with('$') {
+                        // Parse bulk string length
+                        let bulk_length: usize = match bulk_length_line[1..].parse() {
+                            Ok(len) => len,
+                            Err(_) => {
+                                results.push((None, vec![], "-ERR invalid bulk string length\r\n".to_string(), consumed_length));
+                                continue;
+                            }
+                        };
 
-                        if command.is_none() {
-                            // First argument is the command
-                            command = Some(arg.to_uppercase());
+                        // Now get the actual argument
+                        if let Some(arg) = lines.next() {
+                            consumed_length += arg.len() + 2;  // Include \r\n
+
+                            if command.is_none() {
+                                // First argument is the command
+                                command = Some(arg.to_uppercase());
+                            } else {
+                                // Subsequent arguments
+                                args.push(arg.to_string());
+                            }
                         } else {
-                            // Subsequent arguments
-                            args.push(arg.to_string());
+                            // Incomplete message, return what we have so far
+                            break;
                         }
                     } else {
-                        // Incomplete message, return what we have so far
-                        partial_message.push_str(&line);
-                        break;
+                        results.push((None, vec![], "-ERR expected bulk string\r\n".to_string(), consumed_length));
+                        continue;
                     }
+                } else {
+                    // Incomplete message, return what we have so far
+                    break;
                 }
             }
 
