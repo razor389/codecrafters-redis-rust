@@ -57,23 +57,28 @@ pub fn listen_for_master_commands(
 
         partial_message.extend_from_slice(&buffer[..bytes_read]);
 
-        // Handle "+OK\r\n" to send the PSYNC command
-        if let Ok(partial_str) = std::str::from_utf8(&partial_message) {
-            if partial_str == "+OK\r\n" {
+        // Handle "+OK\r\n" as text
+        if let Ok(message_str) = std::str::from_utf8(&partial_message) {
+            if message_str == "+OK\r\n" {
                 println!("Received +OK from master. Sending PSYNC command...");
                 stream.write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n")?;
                 partial_message.clear();
                 continue;
             }
+        }
 
-            // Handle FULLRESYNC
-            if partial_str.starts_with("+FULLRESYNC") {
-                if let Some((replid, offset)) = parse_fullresync(partial_str) {
+        // Handle FULLRESYNC as a byte slice and process as a string only if needed
+        if let Some(fullresync_pos) = partial_message.windows(11).position(|w| w == b"+FULLRESYNC") {
+            let fullresync_end = partial_message.windows(2).position(|w| w == b"\r\n").unwrap_or(partial_message.len());
+            let fullresync_message = &partial_message[fullresync_pos..fullresync_end + 2];
+
+            if let Ok(fullresync_str) = std::str::from_utf8(fullresync_message) {
+                if let Some((replid, offset)) = parse_fullresync(fullresync_str) {
                     let mut db_lock = db.lock().unwrap();
                     db_lock.replication_info.insert("master_replid".to_string(), replid.clone());
                     db_lock.replication_info.insert("master_repl_offset".to_string(), offset.clone());
                     println!("Handled FULLRESYNC: replid = {}, offset = {}", replid, offset);
-                    partial_message.clear();
+                    partial_message.drain(..fullresync_end + 2);
                 }
             }
         }
@@ -83,12 +88,7 @@ pub fn listen_for_master_commands(
             if let Some(bulk_length) = parse_bulk_length(&partial_message) {
                 println!("bulk length: {}", bulk_length);
 
-                // Find where the header ends ("$<length>\r\n")
-                let header_size = partial_message
-                    .windows(2)
-                    .position(|w| w == b"\r\n")
-                    .map(|pos| pos + 2)
-                    .unwrap_or(0);
+                let header_size = partial_message.windows(2).position(|w| w == b"\r\n").unwrap() + 2;
 
                 // Drain the header bytes
                 partial_message.drain(..header_size);
@@ -103,7 +103,6 @@ pub fn listen_for_master_commands(
                         println!("no bytes read from master, continuing.");
                         continue;
                     }
-                    // Append raw bytes directly
                     partial_message.extend_from_slice(&buffer[..bytes_read]);
                 }
 
@@ -113,21 +112,18 @@ pub fn listen_for_master_commands(
                     remaining_bulk_bytes = 0;
                     received_rdb = true;
                     println!("RDB file fully received and processed.");
-                    println!("remaining message bytes: {:?}", partial_message);
                 }
             }
         }
 
         // If there are remaining bulk bytes, wait for more data
         if remaining_bulk_bytes > 0 {
-            // Consume the remaining bulk string bytes as they arrive
             if partial_message.len() >= remaining_bulk_bytes {
                 partial_message.drain(..remaining_bulk_bytes);
                 remaining_bulk_bytes = 0;
                 received_rdb = true;
                 println!("Remaining RDB bytes fully received.");
             } else {
-                // Not enough data, wait for more in the next read
                 continue;
             }
         }
@@ -135,10 +131,8 @@ pub fn listen_for_master_commands(
         // Process Redis commands after RDB has been received
         if received_rdb {
             if let Ok(partial_str) = std::str::from_utf8(&partial_message) {
-                let mut partial_message_str = partial_str.to_string();
-                process_commands_after_rdb(&mut partial_message_str, db.clone(), config_map, stream)?;
+                process_commands_after_rdb(&mut partial_str.to_string(), db.clone(), config_map, stream)?;
             }
-            
         }
     }
     Ok(())
