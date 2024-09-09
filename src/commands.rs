@@ -156,8 +156,6 @@ pub fn handle_wait(db: &RedisDatabase, args: &[String]) -> String {
             return format!(":{}\r\n", matching_slaves);
         }
 
-        // Sleep for a short duration to avoid busy waiting
-        thread::sleep(Duration::from_millis(10));
     }
 }
 
