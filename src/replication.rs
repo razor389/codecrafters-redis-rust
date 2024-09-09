@@ -1,6 +1,7 @@
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::collections::HashMap;
+use std::num::ParseIntError;
 use std::sync::{Arc, Mutex};
 use crate::database::{RedisDatabase, RedisValue};
 use crate::parsing::parse_redis_message;
@@ -87,6 +88,7 @@ pub fn listen_for_master_commands(
 
         // Process Redis commands after RDB has been received
         if received_rdb {
+            println!("partial message: {}", partial_message);
             process_commands_after_rdb(&mut partial_message, db.clone(), config_map, stream)?;
         }
     }
