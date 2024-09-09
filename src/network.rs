@@ -49,9 +49,11 @@ async fn handle_client(
 
     loop {
         println!("Waiting for data...");
-        let mut locked_stream = stream.lock().await;  // Lock the stream for access
+        
+        // Lock the stream for reading and writing at the same time
+        let mut locked_stream = stream.lock().await;
+        
         let bytes_read = locked_stream.read(&mut buffer).await?;
-
         if bytes_read == 0 {
             println!("Connection closed by client.");
             break; // Connection closed by client
@@ -72,43 +74,29 @@ async fn handle_client(
             };
 
             if response.starts_with("+FULLRESYNC") {
-                {
-                    let mut locked_stream = stream.lock().await;
-                    // Send the FULLRESYNC response first
-                    locked_stream.write_all(response.as_bytes()).await?;
-                    locked_stream.flush().await?;
-                }
+                // Send the FULLRESYNC response first
+                locked_stream.write_all(response.as_bytes()).await?;
+                locked_stream.flush().await?;
 
                 // Send the RDB file to the client (slave)
-                {
-                    let mut locked_stream = stream.lock().await;
-                    send_rdb_file(&mut *locked_stream).await?;
-                }
-
+                send_rdb_file(&mut *locked_stream).await?;
                 println!("Sent RDB file after FULLRESYNC");
 
                 // Add the slave connection to the list of slaves
-                {
-                    let mut db_lock = db.lock().await;
-                    db_lock.slave_connections.push(Arc::clone(&stream));  // Reuse the same stream using Arc
-                }
+                let mut db_lock = db.lock().await;
+                db_lock.slave_connections.push(Arc::clone(&stream));  // Reuse the same stream using Arc
                 println!("Added new slave after FULLRESYNC");
 
             } else {
                 // Write the response to the client
-                {
-                    println!("Sending response: {}", response);
-                    let mut locked_stream = stream.lock().await;
-                    println!("Locked stream for writing");
-                    locked_stream.write_all(response.as_bytes()).await?;
-                    locked_stream.flush().await?;
-                }
+                println!("Sending response: {}", response);
+                locked_stream.write_all(response.as_bytes()).await?;
+                locked_stream.flush().await?;
 
                 // Forward the command to all connected slaves if applicable
                 if let Some(cmd) = command {
                     if should_forward_to_slaves(&cmd) {
                         let slaves = {
-                            // Acquire lock briefly to get slave connections
                             let db_lock = db.lock().await;
                             db_lock.slave_connections.clone()
                         };
