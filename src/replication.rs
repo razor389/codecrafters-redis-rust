@@ -93,8 +93,9 @@ pub async fn listen_for_master_commands(
 
         // Process Redis commands after RDB has been received
         if received_rdb{
+            println!("Received Redis command: {}", partial_message);
             while !partial_message.is_empty() {
-                if let Some((command, args, response, consumed_length)) = process_complete_redis_message(&partial_message, &db, config_map).await {
+                if let Some((command, args, _, consumed_length)) = process_complete_redis_message(&partial_message, &db, config_map).await {
                     // Remove the processed part from the partial message
                     partial_message.drain(..consumed_length);
 
