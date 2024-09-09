@@ -15,6 +15,7 @@ pub fn parse_redis_message(
     while let Some(line) = lines.next() {
         let mut command = None;
         let mut args = Vec::new();
+        #[allow(unused_assignments)]
         let mut arg_count = 0;
         let mut consumed_length = 0;
 

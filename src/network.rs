@@ -70,7 +70,7 @@ fn handle_client(
                 parse_redis_message(&current_message, &mut db_lock, config_map)
             };
 
-            for (command, args, response, _) in parsed_results {
+            for (command, _args, response, _) in parsed_results {
                 if response.starts_with("+FULLRESYNC") {
                     // Send the FULLRESYNC response
                     stream.write_all(response.as_bytes())?;
@@ -127,7 +127,7 @@ fn get_end_of_redis_message(message: &str) -> Option<usize> {
                 for _ in 0..arg_count {
                     if let Some(length_line) = lines.next() {
                         if length_line.starts_with('$') {
-                            if let Ok(bulk_length) = length_line[1..].parse::<usize>() {
+                            if let Ok(_bulk_length) = length_line[1..].parse::<usize>() {
                                 total_len += length_line.len() + 2; // $<len>\r\n
                                 if let Some(arg) = lines.next() {
                                     total_len += arg.len() + 2; // Argument and \r\n

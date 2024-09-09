@@ -104,7 +104,7 @@ fn process_commands_after_rdb(
     // Parse the Redis message and handle the parsed commands
     let parsed_results = parse_redis_message(&partial_message, &mut db_lock, config_map);
     
-    for (command, args, response, consumed_length) in parsed_results {
+    for (command, args, _response, consumed_length) in parsed_results {
         // Remove the processed part from the partial message
         partial_message.drain(..consumed_length);
         println!("partial_message after drain: {}", partial_message);
