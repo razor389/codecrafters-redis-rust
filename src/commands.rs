@@ -173,6 +173,7 @@ pub fn process_commands_after_rdb(
         println!("partial_message after drain: {}", partial_message);
         
         if let Some(cmd) = command {
+            println!("command: {}", cmd);
             println!("command message length bytes: {}", command_msg_length_bytes);
             match cmd.as_str() {
                 "SET" => {
