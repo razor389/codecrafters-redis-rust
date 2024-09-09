@@ -78,8 +78,7 @@ pub fn listen_for_master_commands(
                     let mut db_lock = db.lock().unwrap();
                     db_lock.replication_info.insert("master_replid".to_string(), ReplicationInfoValue::StringValue(replid.clone()));
                     db_lock.replication_info.insert("master_repl_offset".to_string(), ReplicationInfoValue::StringValue(offset.clone()));
-                    //println!("Handled FULLRESYNC: replid = {}, offset = {}", replid, offset);
-                    partial_message.drain(..fullresync_end + 2);
+                    partial_message.drain(..fullresync_end + 2);  // Clear the processed part
                 }
             }
         }
@@ -87,8 +86,6 @@ pub fn listen_for_master_commands(
         // Handle RDB file parsing (bulk string)
         if !received_rdb && partial_message.starts_with(b"$") {
             if let Some(bulk_length) = parse_bulk_length(&partial_message) {
-                //println!("bulk length: {}", bulk_length);
-
                 let header_size = partial_message.windows(2).position(|w| w == b"\r\n").unwrap() + 2;
 
                 // Drain the header bytes
@@ -101,7 +98,7 @@ pub fn listen_for_master_commands(
                 while partial_message.len() < remaining_bulk_bytes {
                     let bytes_read = stream.read(&mut buffer)?;
                     if bytes_read == 0 {
-                        println!("no bytes read from master when waiting orn RDB file. breaking.");
+                        println!("no bytes read from master when waiting on RDB file. breaking.");
                         break;
                     }
                     partial_message.extend_from_slice(&buffer[..bytes_read]);
@@ -119,9 +116,12 @@ pub fn listen_for_master_commands(
         // Process Redis commands after RDB has been received
         if received_rdb {
             if let Ok(partial_str) = std::str::from_utf8(&partial_message) {
-                if partial_str.len()>0{
+                if !partial_str.is_empty() {
                     println!("partial str in replication: {}", partial_str);
                     process_commands_after_rdb(&mut partial_str.to_string(), db.clone(), config_map, stream)?;
+
+                    // Clear the portion of the partial_message that has been processed
+                    partial_message.clear();
                 }
             }
         }
