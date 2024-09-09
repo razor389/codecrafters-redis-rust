@@ -120,6 +120,7 @@ pub fn listen_for_master_commands(
         if received_rdb {
             if let Ok(partial_str) = std::str::from_utf8(&partial_message) {
                 if partial_str.len()>0{
+                    println!("partial str in replication: {}", partial_str);
                     process_commands_after_rdb(&mut partial_str.to_string(), db.clone(), config_map, stream)?;
                 }
             }
