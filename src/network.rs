@@ -60,7 +60,7 @@ async fn handle_client(
         partial_message.push_str(&String::from_utf8_lossy(&buffer[..bytes_read]));
 
         if partial_message.ends_with("\r\n") {
-            println!("Received message: {}", partial_message);
+            println!("Received message in handle client: {}", partial_message);
 
             let (command, _, response, _) = {
                 // Acquire lock briefly for database operations
