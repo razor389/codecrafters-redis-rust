@@ -44,40 +44,51 @@ async fn handle_client(
     db: Arc<Mutex<RedisDatabase>>,
     config_map: &HashMap<String, String>,
 ) -> std::io::Result<()> {
-    let mut buffer = vec![0; 1024]; // Buffer size
+    let mut buffer = vec![0; 4096]; // Increased buffer size
     let mut partial_message = String::new();
 
     loop {
         println!("Waiting for data...");
-        let mut locked_stream = stream.lock().await;  // Lock the stream for access
-        let bytes_read = locked_stream.read(&mut buffer).await?;
+        let bytes_read = {
+            let mut locked_stream = stream.lock().await;  // Lock the stream for access
+            locked_stream.read(&mut buffer).await?
+        };
 
         if bytes_read == 0 {
             println!("Connection closed by client.");
             break; // Connection closed by client
         }
 
+        // Append the newly read data to the partial message
         partial_message.push_str(&String::from_utf8_lossy(&buffer[..bytes_read]));
 
-        if partial_message.ends_with("\r\n") {
-            println!("Received message in handle client: {}", partial_message);
+        // Process messages while we have complete ones
+        while partial_message.contains("\r\n") {
+            let message_end = partial_message.find("\r\n").unwrap() + 2;
+            let current_message = partial_message[..message_end].to_string(); // Extract the message
+            println!("Received message in handle client: {}", current_message);
 
             let (command, _, response, _) = {
                 // Acquire lock briefly for database operations
                 let mut db_lock = db.lock().await;
-                parse_redis_message(&partial_message, &mut db_lock, config_map)
+                parse_redis_message(&current_message, &mut db_lock, config_map)
             };
 
-            // Handle FULLRESYNC
             if response.starts_with("+FULLRESYNC") {
-                // Send the FULLRESYNC response first
-                locked_stream.write_all(response.as_bytes()).await?;
-                locked_stream.flush().await?;
+                // Handle FULLRESYNC
+                {
+                    let mut locked_stream = stream.lock().await;
+                    // Send the FULLRESYNC response first
+                    locked_stream.write_all(response.as_bytes()).await?;
+                    locked_stream.flush().await?;
+                }
 
                 // Send the RDB file to the client (slave)
-                drop(locked_stream);  // Unlock the stream to send the RDB file outside the lock
-                let mut locked_stream = stream.lock().await;
-                send_rdb_file(&mut *locked_stream).await?;
+                {
+                    let mut locked_stream = stream.lock().await;
+                    send_rdb_file(&mut *locked_stream).await?;
+                }
+
                 println!("Sent RDB file after FULLRESYNC");
 
                 // Add the slave connection to the list of slaves
@@ -86,11 +97,13 @@ async fn handle_client(
                     db_lock.slave_connections.push(Arc::clone(&stream));  // Reuse the same stream using Arc
                 }
                 println!("Added new slave after FULLRESYNC");
-
             } else {
-                // Write the response to the client
-                locked_stream.write_all(response.as_bytes()).await?;
-                locked_stream.flush().await?;
+                // For non-FULLRESYNC responses, handle regular Redis commands
+                {
+                    let mut locked_stream = stream.lock().await;
+                    locked_stream.write_all(response.as_bytes()).await?;
+                    locked_stream.flush().await?;
+                }
 
                 // Forward the command to all connected slaves if applicable
                 if let Some(cmd) = command {
@@ -102,20 +115,23 @@ async fn handle_client(
                         };
                         for slave_connection in slaves {
                             let mut slave_stream = slave_connection.lock().await;
-                            println!("Forwarding message to slave: {}", partial_message);
-                            slave_stream.write_all(partial_message.as_bytes()).await?;
+                            println!("Forwarding message to slave: {}", current_message);
+                            slave_stream.write_all(current_message.as_bytes()).await?;
                             slave_stream.flush().await?;
                         }
                     }
                 }
             }
 
-            partial_message.clear(); // Reset message buffer for the next command
+            // Remove the processed message from the partial buffer
+            partial_message.drain(..message_end);
         }
     }
 
     Ok(())
 }
+
+
 
 fn should_forward_to_slaves(command: &str) -> bool {
     match command {
