@@ -19,6 +19,7 @@ pub fn start_server(config_map: HashMap<String, String>, db: Arc<Mutex<RedisData
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
+                println!("New client connection: {}", stream.peer_addr().unwrap());
                 let db = Arc::clone(&db);
                 let config_map = config_map.clone();
                 thread::spawn(move || {
