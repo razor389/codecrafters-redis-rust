@@ -32,7 +32,7 @@ pub async fn send_replconf(
     let response = String::from_utf8_lossy(&buffer[..bytes_read]);
 
     if response.contains("+OK") {
-        println!("Received +OK from master. Waiting for FULLRESYNC or CONTINUE.");
+        println!("Received +OK from master. Waiting for more commands...");
         // Keep listening for further commands from the master
         listen_for_master_commands(stream, db, config_map).await?;
     } else {
@@ -42,7 +42,6 @@ pub async fn send_replconf(
     Ok(())
 }
 
-// Listens for and processes commands sent by the master
 pub async fn listen_for_master_commands(
     stream: &mut TcpStream,
     db: Arc<Mutex<RedisDatabase>>,
@@ -83,7 +82,7 @@ pub async fn listen_for_master_commands(
 
                 // After FULLRESYNC, expect the RDB file
                 if let Some(rdb_bulk_len) = parse_bulk_length(&partial_message) {
-                    let rdb_data = receive_bulk_string(stream, rdb_bulk_len).await?;
+                    let _rdb_data = receive_bulk_string(stream, rdb_bulk_len).await?;
                     println!("RDB file received, length: {}", rdb_bulk_len);
 
                     // Process the RDB data if needed
@@ -94,11 +93,19 @@ pub async fn listen_for_master_commands(
                 }
             }
         }
+        // Handle "+OK\r\n" to send the PSYNC command
+        else if partial_message == "+OK\r\n" {
+            println!("Received +OK from master. Sending PSYNC command...");
+            stream
+                .write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n")
+                .await?;
+            partial_message.clear(); // Clear after handling the +OK
+        }
         // Handle remaining Redis commands (SET, GET, etc.)
         else if partial_message.contains("\r\n") {
             // If we have a complete Redis command, parse it
             if let Ok(mut db_lock) = db.try_lock() {
-                let (command, args, response) = parse_redis_message(&partial_message, &mut db_lock, config_map);
+                let (command, args, _response) = parse_redis_message(&partial_message, &mut db_lock, config_map);
 
                 // Log the command and response for debugging purposes
                 println!("Parsed command: {:?}, Args: {:?}", command, args);
@@ -145,6 +152,7 @@ async fn receive_bulk_string(
     stream.read_exact(&mut data).await?;
     Ok(String::from_utf8_lossy(&data).to_string())
 }
+
 
 // Initializes replication settings, determining whether this server is a master or slave
 pub async fn initialize_replication(
