@@ -121,7 +121,7 @@ pub fn handle_wait(db: &RedisDatabase, args: &[String]) -> String {
         };
 
         // Debug: Print the master offset
-        println!("Master replication offset: {}", master_repl_offset);
+        //println!("Master replication offset: {}", master_repl_offset);
 
         // Count how many slaves have matched the master_repl_offset
         let matching_slaves = db
