@@ -83,6 +83,10 @@ fn listen_for_master_commands(stream: &mut TcpStream, db: Arc<Mutex<RedisDatabas
         else if message.starts_with('$') {
             continue; // Ignore the RDB file for now
         }
+        else if message.starts_with('*') {
+            println!("Received multi-bulk response from master: {}", message);
+            continue; // Ignore multi-bulk responses for now
+        }
         // Handle Redis commands after the RDB is processed
         else {
             println!("Received command from master: {}", message);
