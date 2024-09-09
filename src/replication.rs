@@ -76,45 +76,47 @@ pub async fn listen_for_master_commands(
         if partial_message.starts_with("+FULLRESYNC") {
             if let Some((replid, offset)) = parse_fullresync(&partial_message) {
                 let mut db_lock = db.lock().await;
-                db_lock.replication_info.insert("master_replid".to_string(), replid.clone());
-                db_lock.replication_info.insert("master_repl_offset".to_string(), offset.clone());
+                db_lock.replication_info.insert("master_replid".to_string(), replid.clone());  // Clone before moving
+                db_lock.replication_info.insert("master_repl_offset".to_string(), offset.clone()); // Clone before moving
                 println!("Handled FULLRESYNC: replid = {}, offset = {}", replid, offset);
-                partial_message.clear();
+                partial_message.clear();  // Clear just the FULLRESYNC part
             }
         }
 
         // Handle RDB file parsing
         if partial_message.starts_with('$') && !expecting_rdb {
-            println!("Received bulk string: {}", partial_message);
             if let Some(length) = parse_bulk_length(&partial_message) {
                 rdb_bulk_len = length;
                 expecting_rdb = true;
-                partial_message.clear();
+                partial_message.clear();  // Clear the bulk length header but keep the rest
                 println!("Expecting RDB file of length: {}", rdb_bulk_len);
             }
         }
 
         if expecting_rdb {
             // Read the RDB file data
-            let rdb_data = receive_rdb_file(stream, rdb_bulk_len).await?;
-            println!("Received RDB file: {:?} of length: {}", rdb_data, rdb_data.len());
-            expecting_rdb = false;
-            partial_message.clear();  // Clear the buffer after handling the RDB file
-            continue;
+            if partial_message.len() >= rdb_bulk_len {
+                let rdb_data = partial_message.drain(..rdb_bulk_len).collect::<String>();
+                println!("Received RDB file: {:?}", rdb_data);
+                expecting_rdb = false;
+                // Don't clear partial_message here, since it might still contain SET commands.
+            } else {
+                continue;  // Wait for more data if the RDB isn't fully received yet
+            }
         }
 
         // Handle Redis commands after RDB
         while let Some(position) = partial_message.find("\r\n") {
             let command_str = partial_message[..position + 2].to_string();
-            partial_message = partial_message[position + 2..].to_string();
+            partial_message = partial_message[position + 2..].to_string();  // Retain the rest of the message
 
             if let Ok(mut db_lock) = db.try_lock() {
                 let (command, args, _) = parse_redis_message(&command_str, &mut db_lock, config_map);
                 if let Some(cmd) = command {
                     if cmd == "SET" && args.len() >= 2 {
-                        let key = args[0].clone();
-                        let value = args[1].clone();
-                        db_lock.insert(key.clone(), RedisValue::new(value.clone(), None));
+                        let key = args[0].clone();  // Clone key
+                        let value = args[1].clone(); // Clone value
+                        db_lock.insert(key.clone(), RedisValue::new(value.clone(), None));  // Insert cloned key and value
                         println!("Applied SET command: {} = {}", key, value);
                     }
                 }
