@@ -56,8 +56,11 @@ fn handle_client(
         if partial_message.ends_with("\r\n") {
             println!("Received message: {}", partial_message);
 
-            let mut db_lock = db.lock().unwrap();
-            let (command, response) = parse_redis_message(&partial_message, &mut db_lock, config_map);
+            let (command, response) = {
+                // Acquire lock briefly for database operations
+                let mut db_lock = db.lock().unwrap();
+                parse_redis_message(&partial_message, &mut db_lock, config_map)
+            };
 
             // Handle FULLRESYNC
             if response.starts_with("+FULLRESYNC") {
@@ -70,7 +73,11 @@ fn handle_client(
                 println!("Sent RDB file after FULLRESYNC");
 
                 // Add the slave connection to the list of slaves
-                db_lock.slave_connections.push(Arc::new(Mutex::new(stream.try_clone()?)));
+                let cloned_stream = Arc::new(Mutex::new(stream.try_clone()?));
+                {
+                    let mut db_lock = db.lock().unwrap();
+                    db_lock.slave_connections.push(cloned_stream);
+                }
                 println!("Added new slave after FULLRESYNC");
 
             } else {
@@ -81,7 +88,12 @@ fn handle_client(
                 // Forward the command to all connected slaves if applicable
                 if let Some(cmd) = command {
                     if should_forward_to_slaves(&cmd) {
-                        for slave_connection in &db_lock.slave_connections {
+                        let slaves = {
+                            // Acquire lock briefly to get slave connections
+                            let db_lock = db.lock().unwrap();
+                            db_lock.slave_connections.clone()
+                        };
+                        for slave_connection in slaves {
                             let mut slave_stream = slave_connection.lock().unwrap();
                             println!("Forwarding message to slave: {}", partial_message);
                             slave_stream.write_all(partial_message.as_bytes())?;
@@ -97,7 +109,6 @@ fn handle_client(
 
     Ok(())
 }
-
 
 fn should_forward_to_slaves(command: &str) -> bool {
     match command {
