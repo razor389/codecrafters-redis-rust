@@ -139,14 +139,14 @@ pub fn handle_wait(db: &RedisDatabase, args: &[String]) -> String {
 
                     return *slave_offset >= master_repl_offset;
                 } else {
-                    println!("No replication info found for slave {}", slave_connection.peer_addr().unwrap());
+                    //println!("No replication info found for slave {}", slave_connection.peer_addr().unwrap());
                 }
                 false
             })
             .count();
 
         // Debug: Print the number of matching slaves
-        println!("Matching slaves: {}", matching_slaves);
+        //println!("Matching slaves: {}", matching_slaves);
 
         // If we have enough matching slaves, return the count
         if matching_slaves >= num_slaves_to_wait_for {
