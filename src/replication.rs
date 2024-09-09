@@ -107,9 +107,6 @@ pub async fn listen_for_master_commands(
                         }
                     }
 
-                    if !response.is_empty() {
-                        stream.write_all(response.as_bytes()).await?;
-                    }
                 } else {
                     // If we don't have a complete message, break the loop and wait for more data
                     break;
