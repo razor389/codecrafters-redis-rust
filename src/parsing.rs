@@ -11,7 +11,7 @@ pub fn parse_redis_message(
     let mut lines = message.lines();
     let mut results = Vec::new();
     let mut partial_message = String::new();
-
+    println!("parsing message {}", message);
     while let Some(line) = lines.next() {
         let mut command = None;
         let mut args = Vec::new();
