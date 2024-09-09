@@ -95,22 +95,22 @@ pub async fn listen_for_master_commands(
             partial_message.clear(); // Clear after handling the +OK
         }
 
-        // Handle and process individual Redis commands
+        // Now handle Redis commands after the RDB file
         while let Some(position) = partial_message.find("\r\n") {
             // Extract one complete command from partial_message
-            let command = partial_message[..position + 2].to_string(); // Create a copy of the command
-            partial_message = partial_message[position + 2..].to_string(); // Reassign the remaining part
+            let command_str = partial_message[..position + 2].to_string(); // Copy the command
+            partial_message = partial_message[position + 2..].to_string(); // Update the remaining part
 
             // If we have a complete Redis command, parse it
             if let Ok(mut db_lock) = db.try_lock() {
-                let (command, args, _) = parse_redis_message(&command, &mut db_lock, config_map);
+                let (command, args, _) = parse_redis_message(&command_str, &mut db_lock, config_map);
 
                 // Log the command and response for debugging purposes
                 println!("Parsed command: {:?}, Args: {:?}", command, args);
 
                 // Apply SET command to the slave's local database
                 if let Some(cmd) = command {
-                    if cmd == "SET" && args.len() == 2 {
+                    if cmd == "SET" && args.len() >= 2 {
                         let key = args[0].clone();  // Access key
                         let value = args[1].clone();  // Access value
                         db_lock.insert(key, RedisValue::new(value, None));  // Insert into database
