@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use std::thread;
 
 // Handle the SET command
 pub fn handle_set(db: &mut RedisDatabase, args: &[String]) -> String {
@@ -89,22 +91,83 @@ pub fn handle_info(db: &RedisDatabase, args: &[String]) -> String {
     }
 }
 
+
+
 // Handle the WAIT command
 pub fn handle_wait(db: &RedisDatabase, args: &[String]) -> String {
-    if args.len() == 2 {
-        let num_slaves = db.slave_connections.len();
-        format!(":{}\r\n", num_slaves)
-    } else{
-        "-ERR wrong number of arguments for WAIT\r\n".to_string()
+    if args.len() != 2 {
+        return "-ERR wrong number of arguments for WAIT\r\n".to_string();
+    }
+
+    // Parse the number of slaves to wait for
+    let num_slaves_to_wait_for: usize = match args[0].parse() {
+        Ok(n) => n,
+        Err(_) => return "-ERR invalid number of slaves\r\n".to_string(),
+    };
+
+    // Parse the timeout in milliseconds
+    let timeout_ms: u64 = match args[1].parse() {
+        Ok(t) => t,
+        Err(_) => return "-ERR invalid timeout value\r\n".to_string(),
+    };
+
+    // Start timer to keep track of the elapsed time
+    let start_time = Instant::now();
+    let timeout_duration = Duration::from_millis(timeout_ms);
+
+    // Loop until either the required number of slaves match or the timeout occurs
+    loop {
+        
+
+        // Get master_repl_offset
+        let master_repl_offset = match db.replication_info.get("master_repl_offset") {
+            Some(ReplicationInfoValue::StringValue(offset)) => match offset.parse::<u64>() {
+                Ok(offset) => offset,
+                Err(_) => return "-ERR invalid master replication offset\r\n".to_string(),
+            },
+            _ => return "-ERR master replication offset not found\r\n".to_string(),
+        };
+
+        // Count how many slaves have matched the master_repl_offset
+        let matching_slaves = db
+            .slave_connections
+            .iter()
+            .filter(|_| {
+                if let Some(ReplicationInfoValue::StringValue(slave_offset)) = db
+                    .replication_info
+                    .get(&format!("slave_repl_offset"))
+                {
+                    if let Ok(slave_offset_value) = slave_offset.parse::<u64>() {
+                        return slave_offset_value >= master_repl_offset;
+                    }
+                }
+                false
+            })
+            .count();
+
+        // If we have enough matching slaves, return the count
+        if matching_slaves >= num_slaves_to_wait_for {
+            return format!(":{}\r\n", matching_slaves);
+        }
+
+        // Check if timeout has been exceeded
+        if start_time.elapsed() >= timeout_duration {
+            // Return the number of slaves that matched before the timeout
+            return format!(":{}\r\n", matching_slaves);
+        }
+
+        // Sleep for a short duration to avoid busy waiting
+        thread::sleep(Duration::from_millis(10));
     }
 }
+
 
 // Handle the REPLCONF command
 pub fn handle_replconf(db: &RedisDatabase, args: &[String]) -> String {
     if args.len() == 2 && args[0].to_uppercase() == "GETACK" && args[1] == "*" {
         // Retrieve the value of "bytes_processed" from the replication info
-        let bytes_processed = match db.get_replication_info("bytes_processed") {
-            Some(ReplicationInfoValue::CommandBytes(bytes)) => *bytes,  // Dereference to get the usize value
+        let bytes_processed = match db.get_replication_info("slave_repl_offset") {
+            Some(ReplicationInfoValue::ByteValue(bytes)) => *bytes,  // Dereference to get the usize value
             _ => 0,  // Default to 0 if not found
         };
 

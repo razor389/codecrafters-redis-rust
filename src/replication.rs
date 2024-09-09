@@ -192,7 +192,13 @@ pub fn initialize_replication(
         let mut db_lock = db.lock().unwrap();
         db_lock.replication_info.insert("role".to_string(), ReplicationInfoValue::StringValue("master".to_string()));
         db_lock.replication_info.insert("master_replid".to_string(), ReplicationInfoValue::StringValue("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string()));
-        db_lock.replication_info.insert("master_repl_offset".to_string(), ReplicationInfoValue::StringValue("0".to_string()));
+        if !db_lock.replication_info.contains_key("master_repl_offset") {
+            // If the master_repl_offset doesn't exist, initialize it to 0
+            db_lock.replication_info.insert(
+                "master_repl_offset".to_string(),
+                ReplicationInfoValue::StringValue("0".to_string())
+            );
+        }
         println!("Running as master.");
     }
 }

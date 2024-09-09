@@ -8,7 +8,7 @@ use std::fmt;
 #[derive(Debug)]
 pub enum ReplicationInfoValue {
     StringValue(String),
-    CommandBytes(usize), // Number of bytes worth of commands processed
+    ByteValue(usize), // Number of bytes worth of commands processed
 }
 
 // Implement the Display trait for ReplicationInfoValue
@@ -16,7 +16,7 @@ impl fmt::Display for ReplicationInfoValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ReplicationInfoValue::StringValue(s) => write!(f, "{}", s),
-            ReplicationInfoValue::CommandBytes(bytes) => write!(f, "{} bytes", bytes),
+            ReplicationInfoValue::ByteValue(bytes) => write!(f, "{} bytes", bytes),
         }
     }
 }

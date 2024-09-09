@@ -4,7 +4,7 @@ use std::net::{TcpListener, TcpStream};
 use std::io::{Read, Write};
 use std::thread;
 use crate::commands::send_rdb_file;
-use crate::database::RedisDatabase;
+use crate::database::{RedisDatabase, ReplicationInfoValue};
 use crate::parsing::parse_redis_message;
 
 pub fn start_server(config_map: HashMap<String, String>, db: Arc<Mutex<RedisDatabase>>) -> std::io::Result<()> {
@@ -94,18 +94,51 @@ fn handle_client(
                     // Forward the command to all connected slaves if applicable
                     if let Some(cmd) = command {
                         if should_forward_to_slaves(&cmd) {
+                            // Calculate the length of the current message in bytes
+                            let bytes_sent = current_message.as_bytes().len();
+
+                            // Lock the database and clone the slave connections
                             let slaves = {
                                 let db_lock = db.lock().unwrap();
                                 db_lock.slave_connections.clone()
                             };
+
+                            // Forward the message to each slave
                             for slave_connection in slaves {
                                 let mut slave_stream = slave_connection.lock().unwrap();
                                 println!("Forwarding message to slave: {}", current_message);
+                                
+                                // Write the message to the slave's stream
                                 slave_stream.write_all(current_message.as_bytes())?;
                                 slave_stream.flush()?;
                             }
+
+                            // Increment the master_repl_offset only once for the total bytes sent
+                            let mut db_lock = db.lock().unwrap();
+                            // Increment the master_repl_offset in replication_info
+                            if let Some(ReplicationInfoValue::StringValue(offset_str)) = db_lock.replication_info.get("master_repl_offset") {
+                                // Parse the current offset from the string
+                                if let Ok(current_offset) = offset_str.parse::<u64>() {
+                                    // Increment the offset by the number of bytes sent
+                                    let new_offset = current_offset + bytes_sent as u64;
+
+                                    // Update the replication_info with the new offset as a string
+                                    db_lock.replication_info.insert(
+                                        "master_repl_offset".to_string(),
+                                        ReplicationInfoValue::StringValue(new_offset.to_string())
+                                    );
+                                }
+                            } else {
+                                // If the master_repl_offset does not exist or is not a StringValue, initialize it
+                                db_lock.replication_info.insert(
+                                    "master_repl_offset".to_string(),
+                                    ReplicationInfoValue::StringValue(bytes_sent.to_string())
+                                );
+                            }
+
                         }
                     }
+
                 }
             }
 
