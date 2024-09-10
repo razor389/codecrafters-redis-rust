@@ -3,7 +3,6 @@ use std::sync::{Arc, Mutex};
 use std::net::{TcpListener, TcpStream};
 use std::io::{Read, Write};
 use std::thread;
-use std::time::{Duration, Instant};
 use crate::commands::send_rdb_file;
 use crate::database::{RedisDatabase, ReplicationInfoValue};
 use crate::parsing::parse_redis_message;
@@ -99,6 +98,7 @@ fn handle_client(
                 
                         // Activate the WAIT command in the database
                         {
+                            println!("activating wait command");
                             let mut db_lock = db.lock().unwrap();
                             db_lock.activate_wait_command(num_slaves, timeout_ms);
                         }
