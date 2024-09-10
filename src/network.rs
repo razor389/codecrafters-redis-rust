@@ -1,4 +1,3 @@
-use core::num;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::net::{TcpListener, TcpStream};
@@ -49,22 +48,20 @@ fn handle_client(
     println!("started handle client");
     let mut buffer = vec![0; 4096];
     let mut partial_message = String::new();
-    let mut wait_command_active = false;
-    let mut responding_slaves = 0;
-    let mut num_slaves_to_wait_for = 0;
-    let mut start_time = Instant::now();
-    let mut timeout_duration = Duration::from_millis(0);
 
     loop {
         println!("Waiting for data...");
-        // Check for timeout if we're in a WAIT command state
-        if wait_command_active && start_time.elapsed() >= timeout_duration {
-            println!("timed out on wait command");
-            let wait_response = format!(":{}\r\n", responding_slaves);
-            stream.write_all(wait_response.as_bytes())?;
-            stream.flush()?;
-            wait_command_active = false; // Reset wait state
-            responding_slaves = 0; // Reset the counter
+
+        // Check if WAIT command has timed out
+        {
+            let mut db_lock = db.lock().unwrap();
+            if let Some(responding_slaves) = db_lock.check_wait_timeout() {
+                println!("WAIT command timed out");
+                let wait_response = format!(":{}\r\n", responding_slaves);
+                stream.write_all(wait_response.as_bytes())?;
+                stream.flush()?;
+                db_lock.reset_wait_state();
+            }
         }
 
         // Read data from the stream
@@ -97,19 +94,21 @@ fn handle_client(
                         stream.write_all(error_response.as_bytes())?;
                         stream.flush()?;
                     } else {
-                        // Parse the number of slaves and the timeout from the arguments
-                        num_slaves_to_wait_for = args[0].parse::<usize>().unwrap_or(0);
+                        let num_slaves = args[0].parse::<usize>().unwrap_or(0);
                         let timeout_ms = args[1].parse::<u64>().unwrap_or(0);
-                        timeout_duration = Duration::from_millis(timeout_ms);
-                        start_time = Instant::now(); // Start the timer for the WAIT command
-
+                
+                        // Activate the WAIT command in the database
+                        {
+                            let mut db_lock = db.lock().unwrap();
+                            db_lock.activate_wait_command(num_slaves, timeout_ms);
+                        }
+                
                         // Send REPLCONF GETACK * to all slaves
-                        
                         let slaves = {
                             let db_lock = db.lock().unwrap();
                             db_lock.slave_connections.clone()
                         };
-
+                
                         for slave_connection in slaves.iter() {
                             let mut slave_stream = slave_connection.lock().unwrap();
                             if slave_stream.write_all(replconf_getack_message.as_bytes()).is_err() {
@@ -119,25 +118,18 @@ fn handle_client(
                             sent_replconf_getack = true;
                             slave_stream.flush()?;
                         }
-                        
-                        wait_command_active = true; // Set WAIT command state to active
-                        println!("wait command active");
-                        
                     }
                 } else if command == Some("REPLCONF".to_string()) && args[0].to_uppercase()=="ACK" {
-                    println!("got replconf ack");
-                    println!("num slaves to wait for: {}", num_slaves_to_wait_for);
-                    if wait_command_active {
-                        println!("slave responded");
-                        responding_slaves += 1; // Count the ACK
+                    let mut db_lock = db.lock().unwrap();
+                    db_lock.increment_responding_slaves();
 
-                        // Check if we have received enough ACKs
-                        if responding_slaves >= num_slaves_to_wait_for {
-                            let wait_response = format!(":{}\r\n", responding_slaves);
+                    let wait_state = db_lock.wait_state.as_ref();
+                    if let Some(wait_state) = wait_state {
+                        if wait_state.responding_slaves >= wait_state.num_slaves_to_wait_for {
+                            let wait_response = format!(":{}\r\n", wait_state.responding_slaves);
                             stream.write_all(wait_response.as_bytes())?;
                             stream.flush()?;
-                            wait_command_active = false; // Reset wait state
-                            responding_slaves = 0; // Reset the counter
+                            db_lock.reset_wait_state();
                         }
                     }
                 } else {
