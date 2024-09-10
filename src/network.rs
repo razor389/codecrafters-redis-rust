@@ -119,7 +119,7 @@ fn handle_client(
                         
                         wait_command_active = true; // Set WAIT command state to active
                     }
-                } else if command == Some("REPLCONF".to_string()) && response.contains("+OK") {
+                } else if command == Some("REPLCONF".to_string()) && args[0].contains("ACK") {
                     if wait_command_active {
                         responding_slaves += 1; // Count the ACK
 
