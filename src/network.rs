@@ -92,6 +92,12 @@ async fn handle_client(
                         stream_lock.flush().await?;
                     } else {
                         println!("Got wait command");
+                        let wait_response =  format!(":{}\r\n", 1);
+
+                        let mut stream_lock = stream.lock().await;
+                        stream_lock.write_all(wait_response.as_bytes()).await?;
+                        stream_lock.flush().await?;
+
                         let num_slaves = args[0].parse::<usize>().unwrap_or(0);
                         let timeout_ms = args[1].parse::<u64>().unwrap_or(0);
 
