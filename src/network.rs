@@ -98,7 +98,6 @@ fn handle_client(
                 
                         // Activate the WAIT command in the database
                         {
-                            println!("activating wait command");
                             let mut db_lock = db.lock().unwrap();
                             db_lock.activate_wait_command(num_slaves, timeout_ms);
                         }
@@ -115,6 +114,7 @@ fn handle_client(
                                 println!("Failed to send REPLCONF GETACK to slave.");
                                 continue;
                             }
+                            println!("sent replconf getack to slave");
                             sent_replconf_getack = true;
                             slave_stream.flush()?;
                         }
