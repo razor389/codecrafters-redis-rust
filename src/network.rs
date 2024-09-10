@@ -1,3 +1,4 @@
+use core::num;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::net::{TcpListener, TcpStream};
@@ -125,6 +126,7 @@ fn handle_client(
                     }
                 } else if command == Some("REPLCONF".to_string()) && args[0].to_uppercase()=="ACK" {
                     println!("got replconf ack");
+                    println!("num slaves to wait for: {}", num_slaves_to_wait_for);
                     if wait_command_active {
                         println!("slave responded");
                         responding_slaves += 1; // Count the ACK
