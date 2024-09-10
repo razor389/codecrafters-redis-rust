@@ -57,8 +57,13 @@ fn handle_client(
             if let Some(responding_slaves) = db_lock.check_wait_timeout() {
                 println!("WAIT command timed out");
                 let wait_response = format!(":{}\r\n", responding_slaves);
-                stream.write_all(wait_response.as_bytes())?;
-                stream.flush()?;
+
+                // Send the timeout response to the original wait stream
+                if let Some(ref mut wait_stream) = db_lock.wait_state.as_mut().unwrap().wait_stream {
+                    wait_stream.write_all(wait_response.as_bytes())?;
+                    wait_stream.flush()?;
+                }
+
                 db_lock.reset_wait_state();
             }
         }
@@ -99,7 +104,7 @@ fn handle_client(
                         // Activate the WAIT command in the database
                         {
                             let mut db_lock = db.lock().unwrap();
-                            db_lock.activate_wait_command(num_slaves, timeout_ms);
+                            db_lock.activate_wait_command(num_slaves, timeout_ms, stream);
                         }
                 
                         // Send REPLCONF GETACK * to all slaves
@@ -122,15 +127,18 @@ fn handle_client(
                     let mut db_lock = db.lock().unwrap();
                     db_lock.increment_responding_slaves();
 
-                    let wait_state = db_lock.wait_state.as_ref();
-                    
+                    let wait_state = db_lock.wait_state.as_mut();
                     if let Some(wait_state) = wait_state {
-                        
                         if wait_state.responding_slaves >= wait_state.num_slaves_to_wait_for {
-                            println!("wait state: {:?}", wait_state);
                             let wait_response = format!(":{}\r\n", wait_state.responding_slaves);
-                            stream.write_all(wait_response.as_bytes())?;
-                            stream.flush()?;
+                            
+                            // Write the response to the original wait stream
+                            if let Some(ref mut wait_stream) = wait_state.wait_stream {
+                                wait_stream.write_all(wait_response.as_bytes())?;
+                                wait_stream.flush()?;
+                            }
+
+                            // Reset the WAIT state
                             db_lock.reset_wait_state();
                         }
                     }

@@ -10,6 +10,20 @@ pub struct WaitState {
     pub responding_slaves: usize,
     pub start_time: Instant,
     pub timeout_duration: Duration,
+    pub wait_stream: Option<TcpStream>,
+}
+
+impl WaitState {
+    pub fn new(num_slaves: usize, timeout: u64, stream: TcpStream) -> Self {
+        Self {
+            active: true,
+            num_slaves_to_wait_for: num_slaves,
+            responding_slaves: 0,
+            start_time: Instant::now(),
+            timeout_duration: Duration::from_millis(timeout),
+            wait_stream: Some(stream), // Store the initiating stream
+        }
+    }
 }
 
 // Define the enum to store either a String or a u32
@@ -68,14 +82,8 @@ impl RedisDatabase {
         self.replication_info.get(key)
     }
 
-    pub fn activate_wait_command(&mut self, num_slaves: usize, timeout: u64) {
-        self.wait_state = Some(WaitState {
-            active: true,
-            num_slaves_to_wait_for: num_slaves,
-            responding_slaves: 0,
-            start_time: Instant::now(),
-            timeout_duration: Duration::from_millis(timeout),
-        });
+    pub fn activate_wait_command(&mut self, num_slaves: usize, timeout: u64, stream: TcpStream) {
+        self.wait_state = Some(WaitState::new(num_slaves, timeout, stream));
     }
 
     pub fn check_wait_timeout(&mut self) -> Option<usize> {
