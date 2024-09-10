@@ -57,6 +57,7 @@ fn handle_client(
         println!("Waiting for data...");
         // Check for timeout if we're in a WAIT command state
         if wait_command_active && start_time.elapsed() >= timeout_duration {
+            println!("timed out on wait command");
             let wait_response = format!(":{}\r\n", responding_slaves);
             stream.write_all(wait_response.as_bytes())?;
             stream.flush()?;
@@ -118,12 +119,13 @@ fn handle_client(
                         }
                         
                         wait_command_active = true; // Set WAIT command state to active
+                        println!("wait command active");
                         
                     }
                 } else if command == Some("REPLCONF".to_string()) && args[0].to_uppercase()=="ACK" {
+                    println!("got replconf ack");
                     if wait_command_active {
-                        println!("wait command active");
-                        println!("num slaves to wait for: {}", num_slaves_to_wait_for);
+                        println!("slave responded");
                         responding_slaves += 1; // Count the ACK
 
                         // Check if we have received enough ACKs
