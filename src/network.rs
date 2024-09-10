@@ -163,6 +163,7 @@ async fn handle_client(
                                     let db_lock = db.lock().await;
                                     db_lock.slave_connections.clone()
                                 };
+                                println!("got here");
 
                                 // Forward the message to each slave
                                 for slave_connection in slaves.iter() {
@@ -268,7 +269,7 @@ async fn handle_wait_command(
                 return Ok(db_lock.slave_connections.len());
             }
             // Simulate checking if more slaves are ready
-            //tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }).await {
         // If the timeout elapses, return an error
