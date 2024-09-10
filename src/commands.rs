@@ -198,11 +198,11 @@ fn wait_for_ack(slave_stream: &mut TcpStream, remaining_time: Duration, replconf
     // Attempt to read from the stream
     match slave_stream.read(&mut buffer) {
         Ok(bytes_read) if bytes_read > 0 => {
+            println!("read bytes from slave");
             let response = String::from_utf8_lossy(&buffer[..bytes_read]);
 
             // Parse the response
             if response.contains("REPLCONF") && response.contains("ACK") {
-                println!("got ack response");
                 if check_byte_length {
                     // Extract the bytes processed from the response
                     if let Some(bytes_processed_str) = response.split("\r\n").last() {
