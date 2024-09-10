@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::net::TcpStream;
 use std::fmt;
+#[derive(Debug)]
 pub struct WaitState {
     pub active: bool,
     pub num_slaves_to_wait_for: usize,
