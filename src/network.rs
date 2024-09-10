@@ -3,7 +3,6 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::time::{timeout, Duration};
 use crate::commands::send_rdb_file;
 use crate::database::{RedisDatabase, ReplicationInfoValue};
 use crate::parsing::parse_redis_message;
@@ -39,7 +38,7 @@ pub async fn start_server(config_map: HashMap<String, String>, db: Arc<Mutex<Red
 }
 
 async fn handle_client(
-    mut stream: TcpStream,
+    stream: TcpStream,
     db: Arc<Mutex<RedisDatabase>>,
     config_map: &HashMap<String, String>,
 ) -> std::io::Result<()> {
@@ -85,23 +84,23 @@ async fn handle_client(
                 let replconf_getack_byte_len = replconf_getack_message.as_bytes().len();
 
                 if command == Some("WAIT".to_string()) {
+                    println!("got wait command");
                     if args.len() != 2 {
                         let error_response = "-ERR wrong number of arguments for WAIT\r\n";
                         let mut stream_lock = stream.lock().await;
                         stream_lock.write_all(error_response.as_bytes()).await?;
                         stream_lock.flush().await?;
                     } else {
-                        println!("Got wait command");
-
                         let num_slaves = args[0].parse::<usize>().unwrap_or(0);
                         let timeout_ms = args[1].parse::<u64>().unwrap_or(0);
-
+                        let mut responding_slaves = 0;
+                
                         // Send REPLCONF GETACK * to all slaves
                         let slaves = {
                             let db_lock = db.lock().await;
                             db_lock.slave_connections.clone()
                         };
-
+                
                         for slave_connection in slaves.iter() {
                             let mut slave_stream = slave_connection.lock().await;
                             if slave_stream.write_all(replconf_getack_message.as_bytes()).await.is_err() {
@@ -111,22 +110,60 @@ async fn handle_client(
                             sent_replconf_getack = true;
                             slave_stream.flush().await?;
                         }
-
-                        // Wait until the WAIT condition is satisfied or timeout occurs
-                        let wait_result = handle_wait_command(db.clone(), num_slaves, timeout_ms).await;
-
+                
+                        // Start the timeout for the WAIT command
+                        let timeout_duration = tokio::time::Duration::from_millis(timeout_ms);
+                
+                        // Listen for REPLCONF ACK responses within the timeout period
+                        let wait_result = tokio::time::timeout(timeout_duration, async {
+                            loop {
+                                let slaves = {
+                                    let db_lock = db.lock().await;
+                                    db_lock.slave_connections.clone()
+                                };
+                
+                                for slave_connection in slaves.iter() {
+                                    let mut slave_stream = slave_connection.lock().await;
+                                    let mut buffer = vec![0; 512]; // Adjust the buffer size as needed
+                
+                                    match slave_stream.read(&mut buffer).await {
+                                        Ok(bytes_read) => {
+                                            if bytes_read == 0 {
+                                                continue; // No response from this slave
+                                            }
+                
+                                            let response = String::from_utf8_lossy(&buffer[..bytes_read]);
+                                            if response.contains("*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK") {
+                                                responding_slaves += 1;
+                                                if responding_slaves >= num_slaves {
+                                                    return Ok::<usize, ()>(responding_slaves); // All slaves have responded
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            println!("Error reading from slave: {:?}", e);
+                                            continue;
+                                        }
+                                    }
+                                }
+                
+                                // Sleep briefly to avoid busy-looping
+                                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                            }
+                        }).await;
+                
+                        // Check the result of the wait
                         let wait_response = match wait_result {
-                            Ok(responding_slaves) => format!(":{}\r\n", responding_slaves),
-                            Err(_) => format!(":0\r\n"),
+                            Ok(Ok(responding_slaves)) => format!(":{}\r\n", responding_slaves),
+                            Ok(Err(_)) | Err(_) => format!(":0\r\n"), // Either timeout or an internal error
                         };
 
+                
                         let mut stream_lock = stream.lock().await;
                         stream_lock.write_all(wait_response.as_bytes()).await?;
                         stream_lock.flush().await?;
                     }
-                } else if command == Some("REPLCONF".to_string()) && args[0].to_uppercase() == "ACK" {
-                    let mut db_lock = db.lock().await;
-                    db_lock.increment_responding_slaves();
+                
                 } else {
                     if response.starts_with("+FULLRESYNC") {
                         // Send the FULLRESYNC response
@@ -256,26 +293,3 @@ fn should_forward_to_slaves(command: &str) -> bool {
     }
 }
 
-async fn handle_wait_command(
-    db: Arc<Mutex<RedisDatabase>>,
-    num_slaves: usize,
-    timeout_ms: u64,
-) -> Result<usize, ()> {
-    let timeout_duration = Duration::from_millis(timeout_ms);
-    // Handle the timeout's result and the inner future's result
-    match timeout(timeout_duration, async {
-        let db_lock = db.lock().await;
-        loop {
-            if db_lock.slave_connections.len() >= num_slaves {
-                return Ok(db_lock.slave_connections.len());
-            }
-            // Simulate checking if more slaves are ready
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    }).await {
-        // If the timeout elapses, return an error
-        Err(_) => Err(()),
-        // Handle the inner result (Result<usize, _>)
-        Ok(inner_result) => inner_result,
-    }
-}

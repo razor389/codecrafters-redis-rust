@@ -5,27 +5,6 @@ use tokio::net::TcpStream;
 use std::sync::Arc;
 use std::fmt;
 
-#[derive(Debug)]
-pub struct WaitState {
-    pub active: bool,
-    pub num_slaves_to_wait_for: usize,
-    pub responding_slaves: usize,
-    pub start_time: Instant,
-    pub timeout_duration: Duration,
-}
-
-impl WaitState {
-    pub fn new(num_slaves: usize, timeout: u64) -> Self {
-        Self {
-            active: true,
-            num_slaves_to_wait_for: num_slaves,
-            responding_slaves: 0,
-            start_time: Instant::now(),
-            timeout_duration: Duration::from_millis(timeout),
-        }
-    }
-}
-
 // Define the enum to store either a String or a u32
 #[derive(Debug)]
 pub enum ReplicationInfoValue {
@@ -47,7 +26,6 @@ pub struct RedisDatabase {
     pub data: HashMap<String, RedisValue>,
     pub replication_info: HashMap<String, ReplicationInfoValue>, // Changed to use the enum
     pub slave_connections: Vec<Arc<Mutex<TcpStream>>>, // Changed to store multiple slave connections
-    pub wait_state: Option<WaitState>, // Add wait state to the database
 }
 
 impl RedisDatabase {
@@ -56,7 +34,6 @@ impl RedisDatabase {
             data: HashMap::new(),
             replication_info: HashMap::new(),
             slave_connections: vec![],
-            wait_state: None, // Initialize as None
         }
     }
 
@@ -82,28 +59,6 @@ impl RedisDatabase {
         self.replication_info.get(key)
     }
 
-    pub fn activate_wait_command(&mut self, num_slaves: usize, timeout: u64) {
-        self.wait_state = Some(WaitState::new(num_slaves, timeout));
-    }
-
-    pub fn check_wait_timeout(&mut self) -> Option<usize> {
-        if let Some(wait_state) = &self.wait_state {
-            if wait_state.active && wait_state.start_time.elapsed() >= wait_state.timeout_duration {
-                return Some(wait_state.responding_slaves);
-            }
-        }
-        None
-    }
-
-    pub fn increment_responding_slaves(&mut self) {
-        if let Some(wait_state) = &mut self.wait_state {
-            wait_state.responding_slaves += 1;
-        }
-    }
-
-    pub fn reset_wait_state(&mut self) {
-        self.wait_state = None;
-    }
 }
 
 #[derive(Debug)]

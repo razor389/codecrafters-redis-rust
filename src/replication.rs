@@ -174,8 +174,8 @@ pub async fn initialize_replication(
         match TcpStream::connect(address.clone()).await {
             Ok(mut stream) => {
                 println!("Connected to master at {}", address);
-                stream.write_all(b"*1\r\n$4\r\nPING\r\n").await;
-                stream.set_nodelay(true);
+                let _ = stream.write_all(b"*1\r\n$4\r\nPING\r\n").await;
+                let _ = stream.set_nodelay(true);
 
                 let mut buffer = vec![0; 512];
                 match stream.read(&mut buffer).await {
