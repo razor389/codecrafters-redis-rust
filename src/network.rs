@@ -114,6 +114,7 @@ fn handle_client(
                         // Activate the WAIT command in the database
                         {
                             println!("activating wait command in db");
+                            println!("stream: {:?}", stream);
                             let mut db_lock = db.lock().unwrap();
                             db_lock.activate_wait_command(num_slaves, timeout_ms, stream.clone()); // Pass a clone of Arc<Mutex<TcpStream>>
                         }
