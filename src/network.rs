@@ -53,23 +53,7 @@ fn handle_client(
         println!("Waiting for data...");
 
         // Check if WAIT command has timed out
-        {
-            let mut db_lock = db.lock().unwrap();
-            if let Some(responding_slaves) = db_lock.check_wait_timeout() {
-                println!("WAIT command timed out");
-                let wait_response = format!(":{}\r\n", responding_slaves);
-                
-                {
-                    let wait_stream = &mut db_lock.wait_state.as_mut().unwrap().wait_stream;
-                    let mut stream_lock = wait_stream.lock().unwrap();
-                    stream_lock.write_all(wait_response.as_bytes())?;
-                    stream_lock.flush()?;
-                } // The stream_lock is dropped here, releasing the first mutable borrow
-                
-                db_lock.reset_wait_state(); // Now we can borrow db_lock again mutably
-                
-            }
-        }
+        check_wait_timeout(&db)?;
 
         // Read data from the stream
         let bytes_read = {
@@ -289,4 +273,20 @@ fn should_forward_to_slaves(command: &str) -> bool {
         "SET" | "GET" | "DEL" | "INCR" | "DECR" | "MSET" | "MGET" => true,
         _ => false, // Do not forward protocol-related commands like PING, REPLCONF, PSYNC, etc.
     }
+}
+
+fn check_wait_timeout(db: &Arc<Mutex<RedisDatabase>>) -> std::io::Result<()> {
+    let mut db_lock = db.lock().unwrap();
+    if let Some(responding_slaves) = db_lock.check_wait_timeout() {
+        println!("wait timed out");
+        let wait_response = format!(":{}\r\n", responding_slaves);
+        {
+            let wait_stream = &mut db_lock.wait_state.as_mut().unwrap().wait_stream;
+            let mut stream_lock = wait_stream.lock().unwrap();
+            stream_lock.write_all(wait_response.as_bytes())?;
+            stream_lock.flush()?;
+        }
+        db_lock.reset_wait_state();
+    }
+    Ok(())
 }
