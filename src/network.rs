@@ -252,7 +252,7 @@ async fn handle_client(
         partial_message.drain(..message_end);
     }
     
-    
+    println!("got here");
     Ok(())
 }
 
