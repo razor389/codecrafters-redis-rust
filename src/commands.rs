@@ -135,6 +135,7 @@ pub fn handle_wait(db: &mut RedisDatabase, args: &[String], check_byte_length: b
             // Calculate remaining time
             let elapsed_time = start_time.elapsed();
             if elapsed_time >= timeout_duration {
+                println!("timeout already exceeded");
                 return 0; // Timeout already exceeded
             }
 
@@ -198,7 +199,6 @@ fn wait_for_ack(slave_stream: &mut TcpStream, remaining_time: Duration, replconf
     // Attempt to read from the stream
     match slave_stream.read(&mut buffer) {
         Ok(bytes_read) if bytes_read > 0 => {
-            println!("read bytes from slave");
             let response = String::from_utf8_lossy(&buffer[..bytes_read]);
 
             // Parse the response
