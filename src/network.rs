@@ -203,6 +203,7 @@ async fn handle_client(
 
                                             // Lock the database and clone the slave connections
                                             let slaves = {
+                                                println!("getting slave connections");
                                                 let db_lock = db.lock().await;
                                                 db_lock.slave_connections.clone()
                                             };
