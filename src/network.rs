@@ -104,6 +104,7 @@ fn handle_client(
                             let wait_response = format!(":{}\r\n", 1);
                             {
                                 let mut stream_lock = stream.lock().unwrap();
+                                println!("stream lock: {:?}", stream);
                                 stream_lock.write_all(wait_response.as_bytes())?;
                                 stream_lock.flush()?;
                             }
