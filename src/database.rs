@@ -10,18 +10,18 @@ pub struct WaitState {
     pub responding_slaves: usize,
     pub start_time: Instant,
     pub timeout_duration: Duration,
-    pub wait_stream: Option<TcpStream>,
+    pub wait_stream: Arc<Mutex<TcpStream>>, // Use Arc<Mutex<TcpStream>> for thread safety
 }
 
 impl WaitState {
-    pub fn new(num_slaves: usize, timeout: u64, stream: TcpStream) -> Self {
+    pub fn new(num_slaves: usize, timeout: u64, stream: Arc<Mutex<TcpStream>>) -> Self {
         Self {
             active: true,
             num_slaves_to_wait_for: num_slaves,
             responding_slaves: 0,
             start_time: Instant::now(),
             timeout_duration: Duration::from_millis(timeout),
-            wait_stream: Some(stream), // Store the initiating stream
+            wait_stream: stream,
         }
     }
 }
@@ -82,7 +82,7 @@ impl RedisDatabase {
         self.replication_info.get(key)
     }
 
-    pub fn activate_wait_command(&mut self, num_slaves: usize, timeout: u64, stream: TcpStream) {
+    pub fn activate_wait_command(&mut self, num_slaves: usize, timeout: u64, stream: Arc<Mutex<TcpStream>>) {
         self.wait_state = Some(WaitState::new(num_slaves, timeout, stream));
     }
 

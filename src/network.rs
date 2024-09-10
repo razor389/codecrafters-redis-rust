@@ -40,11 +40,12 @@ pub fn start_server(config_map: HashMap<String, String>, db: Arc<Mutex<RedisData
 }
 
 fn handle_client(
-    mut stream: TcpStream,
+    stream: TcpStream,
     db: Arc<Mutex<RedisDatabase>>,
     config_map: &HashMap<String, String>,
 ) -> std::io::Result<()> {
     println!("started handle client");
+    let stream = Arc::new(Mutex::new(stream));
     let mut buffer = vec![0; 4096];
     let mut partial_message = String::new();
 
@@ -57,19 +58,24 @@ fn handle_client(
             if let Some(responding_slaves) = db_lock.check_wait_timeout() {
                 println!("WAIT command timed out");
                 let wait_response = format!(":{}\r\n", responding_slaves);
-
-                // Send the timeout response to the original wait stream
-                if let Some(ref mut wait_stream) = db_lock.wait_state.as_mut().unwrap().wait_stream {
-                    wait_stream.write_all(wait_response.as_bytes())?;
-                    wait_stream.flush()?;
-                }
-
-                db_lock.reset_wait_state();
+                
+                {
+                    let wait_stream = &mut db_lock.wait_state.as_mut().unwrap().wait_stream;
+                    let mut stream_lock = wait_stream.lock().unwrap();
+                    stream_lock.write_all(wait_response.as_bytes())?;
+                    stream_lock.flush()?;
+                } // The stream_lock is dropped here, releasing the first mutable borrow
+                
+                db_lock.reset_wait_state(); // Now we can borrow db_lock again mutably
+                
             }
         }
 
         // Read data from the stream
-        let bytes_read = stream.read(&mut buffer)?;
+        let bytes_read = {
+            let mut stream_lock = stream.lock().unwrap();
+            stream_lock.read(&mut buffer)?
+        };
         if bytes_read == 0 {
             println!("Connection closed by client.");
             break;
@@ -95,8 +101,11 @@ fn handle_client(
                 if command == Some("WAIT".to_string()) {
                     if args.len() != 2 {
                         let error_response = "-ERR wrong number of arguments for WAIT\r\n";
-                        stream.write_all(error_response.as_bytes())?;
-                        stream.flush()?;
+                        {   
+                            let mut stream_lock = stream.lock().unwrap();
+                            stream_lock.write_all(error_response.as_bytes())?;
+                            stream_lock.flush()?;
+                        }
                     } else {
                         let num_slaves = args[0].parse::<usize>().unwrap_or(0);
                         let timeout_ms = args[1].parse::<u64>().unwrap_or(0);
@@ -104,9 +113,8 @@ fn handle_client(
                         // Activate the WAIT command in the database
                         {
                             let mut db_lock = db.lock().unwrap();
-                            db_lock.activate_wait_command(num_slaves, timeout_ms, stream);
+                            db_lock.activate_wait_command(num_slaves, timeout_ms, stream.clone()); // Pass a clone of Arc<Mutex<TcpStream>>
                         }
-                
                         // Send REPLCONF GETACK * to all slaves
                         let slaves = {
                             let db_lock = db.lock().unwrap();
@@ -133,10 +141,13 @@ fn handle_client(
                             let wait_response = format!(":{}\r\n", wait_state.responding_slaves);
                             
                             // Write the response to the original wait stream
-                            if let Some(ref mut wait_stream) = wait_state.wait_stream {
-                                wait_stream.write_all(wait_response.as_bytes())?;
-                                wait_stream.flush()?;
+                            {
+                                let wait_stream = wait_state.wait_stream.as_ref();
+                                let mut stream_lock = wait_stream.lock().unwrap();
+                                stream_lock.write_all(wait_response.as_bytes())?;
+                                stream_lock.flush()?;
                             }
+                            
 
                             // Reset the WAIT state
                             db_lock.reset_wait_state();
@@ -145,23 +156,29 @@ fn handle_client(
                 } else {
                     if response.starts_with("+FULLRESYNC") {
                         // Send the FULLRESYNC response
-                        stream.write_all(response.as_bytes())?;
-                        stream.flush()?;
+                        let mut stream_lock = stream.lock().unwrap();
+                        stream_lock.write_all(response.as_bytes())?;
+                        stream_lock.flush()?;
+
 
                         // Send the RDB file to the client (slave)
-                        send_rdb_file(&mut stream)?;
+                        send_rdb_file(&mut stream_lock)?;
                         println!("Sent RDB file after FULLRESYNC");
 
                         // Add the slave connection to the list of slaves
                         let mut db_lock = db.lock().unwrap();
-                        db_lock.slave_connections.push(Arc::new(Mutex::new(stream.try_clone()?)));
+                        let stream_clone = stream_lock.try_clone()?;
+                        db_lock.slave_connections.push(Arc::new(Mutex::new(stream_clone)));
+
                         println!("Added new slave after FULLRESYNC");
 
                     } else {
                         // Write the response to the client
                         println!("Sending response: {}", response);
-                        stream.write_all(response.as_bytes())?;
-                        stream.flush()?;
+                        let mut stream_lock = stream.lock().unwrap();
+                        stream_lock.write_all(response.as_bytes())?;
+                        stream_lock.flush()?;
+
 
                         // Forward the command to all connected slaves if applicable
                         if let Some(cmd) = command {
