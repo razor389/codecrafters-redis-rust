@@ -48,12 +48,12 @@ pub async fn listen_for_master_commands(
     let mut buffer = vec![0; 512];
     let mut partial_message = Vec::new();
     let mut received_rdb = false;
-    let mut remaining_bulk_bytes;
+    #[allow(unused_assignments)]
+    let mut remaining_bulk_bytes = 0;
 
-    loop {
-        let bytes_read = stream.read(&mut buffer).await?;
+    while let Ok(bytes_read) = stream.read(&mut buffer).await {
         if bytes_read == 0 && received_rdb {
-            println!("connection closed by master.");
+            println!("Connection closed by master.");
             break;
         }
 
@@ -69,7 +69,7 @@ pub async fn listen_for_master_commands(
             }
         }
 
-        // Handle FULLRESYNC as a byte slice and process as a string only if needed
+        // Handle FULLRESYNC
         if let Some(fullresync_pos) = partial_message.windows(11).position(|w| w == b"+FULLRESYNC") {
             let fullresync_end = partial_message.windows(2).position(|w| w == b"\r\n").unwrap_or(partial_message.len());
             let fullresync_message = &partial_message[fullresync_pos..fullresync_end + 2];
@@ -79,7 +79,7 @@ pub async fn listen_for_master_commands(
                     let mut db_lock = db.lock().await;
                     db_lock.replication_info.insert("master_replid".to_string(), ReplicationInfoValue::StringValue(replid.clone()));
                     db_lock.replication_info.insert("master_repl_offset".to_string(), ReplicationInfoValue::StringValue(offset.clone()));
-                    partial_message.drain(..fullresync_end + 2);  // Clear the processed part
+                    partial_message.drain(..fullresync_end + 2);
                 }
             }
         }
@@ -91,26 +91,21 @@ pub async fn listen_for_master_commands(
 
                 // Drain the header bytes
                 partial_message.drain(..header_size);
-
-                // Set the number of bytes to expect in the bulk string body
                 remaining_bulk_bytes = bulk_length;
 
-                // Spin until the entire bulk string (RDB file) is received
+                // Read the entire bulk string (RDB file)
                 while partial_message.len() < remaining_bulk_bytes {
                     let bytes_read = stream.read(&mut buffer).await?;
                     if bytes_read == 0 {
-                        println!("no bytes read from master when waiting on RDB file. breaking.");
-                        break;
+                        println!("No bytes read from master when waiting on RDB file. Breaking.");
+                        return Ok(());
                     }
                     partial_message.extend_from_slice(&buffer[..bytes_read]);
                 }
 
-                // Now drain the entire bulk string corresponding to the RDB file
-                if partial_message.len() >= remaining_bulk_bytes {
-                    partial_message.drain(..remaining_bulk_bytes);
-                    received_rdb = true;
-                    println!("RDB file fully received and processed.");
-                }
+                partial_message.drain(..remaining_bulk_bytes);
+                received_rdb = true;
+                println!("RDB file fully received and processed.");
             }
         }
 
@@ -118,15 +113,16 @@ pub async fn listen_for_master_commands(
         if received_rdb {
             if let Ok(partial_str) = std::str::from_utf8(&partial_message) {
                 if !partial_str.is_empty() {
-                    println!("partial str in replication: {}", partial_str);
+                    println!("Processing command in replication: {}", partial_str);
                     process_commands_after_rdb(&mut partial_str.to_string(), db.clone(), config_map, stream).await?;
 
-                    // Clear the portion of the partial_message that has been processed
+                    // Clear the processed part of the message
                     partial_message.clear();
                 }
             }
         }
     }
+
     Ok(())
 }
 
