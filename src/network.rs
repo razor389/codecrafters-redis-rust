@@ -119,6 +119,7 @@ fn handle_client(
                         
                         wait_command_active = true; // Set WAIT command state to active
                         println!("wait command active");
+                        println!("num slaves to wait for: {}", num_slaves_to_wait_for);
                     }
                 } else if command == Some("REPLCONF".to_string()) && args[0].to_uppercase()=="ACK" {
                     if wait_command_active {
