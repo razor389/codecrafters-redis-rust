@@ -42,7 +42,6 @@ async fn handle_client(
     db: Arc<Mutex<RedisDatabase>>,
     config_map: &HashMap<String, String>,
 ) -> std::io::Result<()> {
-    println!("started handle client");
     let stream = Arc::new(Mutex::new(stream));
 
     let mut buffer = vec![0; 4096];
@@ -71,7 +70,7 @@ async fn handle_client(
         // Process all complete Redis messages
         while let Some(message_end) = get_end_of_redis_message(&partial_message) {
             let current_message = partial_message[..message_end].to_string();
-            println!("Received complete Redis message in network: {}", current_message);
+            println!("Received Redis message in handle client: {}", current_message);
 
             let parsed_results = {
                 let mut db_lock = db.lock().await;
@@ -201,8 +200,6 @@ async fn handle_client(
                                     let db_lock = db.lock().await;
                                     db_lock.slave_connections.clone()
                                 };
-                                println!("got here");
-
                                 // Forward the message to each slave
                                 for slave_connection in slaves.iter() {
                                     let mut slave_stream = slave_connection.lock().await;
