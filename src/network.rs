@@ -61,8 +61,15 @@ async fn handle_client(
                 println!("Waiting for data...");
 
                 if bytes_read == 0 {
-                    println!("no bytes read, keeping connection open");
+                    let db_lock = db.lock().await;
+                    if let Some(ReplicationInfoValue::StringValue(value)) = db_lock.get_replication_info("role"){
+                        println!("closing connection for role: {}" ,value);
+                    }
+                
+                    println!("Connection closed by client.");
+                    return Ok(());
                 }else{
+
                     // Append the newly read data to the partial message buffer
                     partial_message.push_str(&String::from_utf8_lossy(&buffer[..bytes_read]));
 
