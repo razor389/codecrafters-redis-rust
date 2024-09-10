@@ -136,6 +136,7 @@ async fn handle_client(
                         // Forward the command to all connected slaves if applicable
                         if let Some(cmd) = command {
                             if should_forward_to_slaves(&cmd) {
+                                println!("forwarding to slaves: {}", cmd);
                                 // Calculate the length of the current message in bytes
                                 let bytes_sent = current_message.as_bytes().len();
 
