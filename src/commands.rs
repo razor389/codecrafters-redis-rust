@@ -93,6 +93,7 @@ pub fn handle_info(db: &RedisDatabase, args: &[String]) -> String {
 
 // Handle the WAIT command with optional byte length matching and multi-threading
 pub fn handle_wait(db: &mut RedisDatabase, args: &[String], check_byte_length: bool) -> String {
+    println!("Handling wait command");
     if args.len() != 2 {
         return "-ERR wrong number of arguments for WAIT\r\n".to_string();
     }
