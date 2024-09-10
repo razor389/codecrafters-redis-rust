@@ -1,8 +1,10 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::net::TcpStream;
+use tokio::sync::Mutex;
+use tokio::net::TcpStream;
+use std::sync::Arc;
 use std::fmt;
+
 #[derive(Debug)]
 pub struct WaitState {
     pub active: bool,

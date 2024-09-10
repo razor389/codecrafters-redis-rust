@@ -1,13 +1,14 @@
-use std::io::{self, Read, Write};
-use std::net::TcpStream;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use tokio::sync::Mutex;
 use crate::database::RedisDatabase;
 use crate::commands::process_commands_after_rdb;
 use crate::database::ReplicationInfoValue;
 
 // Sends REPLCONF commands to the master after receiving the PING response
-pub fn send_replconf(
+pub async fn send_replconf(
     stream: &mut TcpStream,
     port: &str,
     db: Arc<Mutex<RedisDatabase>>,
@@ -18,19 +19,19 @@ pub fn send_replconf(
         port.len(),
         port
     );
-    stream.write_all(replconf_listening_port.as_bytes())?;
+    stream.write_all(replconf_listening_port.as_bytes()).await?;
     println!("Sent REPLCONF listening-port with port: {}", port);
 
-    stream.write_all(b"*5\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$3\r\neof\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n")?;
+    stream.write_all(b"*5\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$3\r\neof\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n").await?;
     println!("Sent REPLCONF capa eof capa psync2");
 
     let mut buffer = vec![0; 512];
-    let bytes_read = stream.read(&mut buffer)?;
+    let bytes_read = stream.read(&mut buffer).await?;
     let response = String::from_utf8_lossy(&buffer[..bytes_read]);
 
     if response.contains("+OK") {
         println!("Received +OK from master. Waiting for more commands...");
-        listen_for_master_commands(stream, db, config_map)?;
+        listen_for_master_commands(stream, db, config_map).await?;
     } else {
         println!("Unexpected response from master: {}", response);
     }
@@ -39,7 +40,7 @@ pub fn send_replconf(
 }
 
 // Listens for further commands from the master after REPLCONF
-pub fn listen_for_master_commands(
+pub async fn listen_for_master_commands(
     stream: &mut TcpStream,
     db: Arc<Mutex<RedisDatabase>>,
     config_map: &HashMap<String, String>,
@@ -50,7 +51,7 @@ pub fn listen_for_master_commands(
     let mut remaining_bulk_bytes;
 
     loop {
-        let bytes_read = stream.read(&mut buffer)?;
+        let bytes_read = stream.read(&mut buffer).await?;
         if bytes_read == 0 && received_rdb {
             println!("connection closed by master.");
             break;
@@ -62,7 +63,7 @@ pub fn listen_for_master_commands(
         if let Ok(message_str) = std::str::from_utf8(&partial_message) {
             if message_str == "+OK\r\n" {
                 println!("Received +OK from master. Sending PSYNC command...");
-                stream.write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n")?;
+                stream.write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n").await?;
                 partial_message.clear();
                 continue;
             }
@@ -75,7 +76,7 @@ pub fn listen_for_master_commands(
 
             if let Ok(fullresync_str) = std::str::from_utf8(fullresync_message) {
                 if let Some((replid, offset)) = parse_fullresync(fullresync_str) {
-                    let mut db_lock = db.lock().unwrap();
+                    let mut db_lock = db.lock().await;
                     db_lock.replication_info.insert("master_replid".to_string(), ReplicationInfoValue::StringValue(replid.clone()));
                     db_lock.replication_info.insert("master_repl_offset".to_string(), ReplicationInfoValue::StringValue(offset.clone()));
                     partial_message.drain(..fullresync_end + 2);  // Clear the processed part
@@ -96,7 +97,7 @@ pub fn listen_for_master_commands(
 
                 // Spin until the entire bulk string (RDB file) is received
                 while partial_message.len() < remaining_bulk_bytes {
-                    let bytes_read = stream.read(&mut buffer)?;
+                    let bytes_read = stream.read(&mut buffer).await?;
                     if bytes_read == 0 {
                         println!("no bytes read from master when waiting on RDB file. breaking.");
                         break;
@@ -118,7 +119,7 @@ pub fn listen_for_master_commands(
             if let Ok(partial_str) = std::str::from_utf8(&partial_message) {
                 if !partial_str.is_empty() {
                     println!("partial str in replication: {}", partial_str);
-                    process_commands_after_rdb(&mut partial_str.to_string(), db.clone(), config_map, stream)?;
+                    process_commands_after_rdb(&mut partial_str.to_string(), db.clone(), config_map, stream).await?;
 
                     // Clear the portion of the partial_message that has been processed
                     partial_message.clear();
@@ -143,7 +144,6 @@ fn parse_fullresync(message: &str) -> Option<(String, String)> {
 
 // Helper function to parse bulk length from the Redis message
 fn parse_bulk_length(message: &[u8]) -> Option<usize> {
-    // Assuming the bulk length is specified after the "$" and before the "\r\n"
     if message.starts_with(b"$") {
         let newline_pos = message.windows(2).position(|w| w == b"\r\n")?;
         let bulk_length_str = std::str::from_utf8(&message[1..newline_pos]).ok()?;
@@ -154,7 +154,7 @@ fn parse_bulk_length(message: &[u8]) -> Option<usize> {
 }
 
 // Initializes replication settings, determining whether this server is a master or slave
-pub fn initialize_replication(
+pub async fn initialize_replication(
     config_map: &HashMap<String, String>,
     db: Arc<Mutex<RedisDatabase>>,
     port: &str,
@@ -166,22 +166,22 @@ pub fn initialize_replication(
         let address = format!("{}:{}", ip, replica_port);
 
         {
-            let mut db_lock = db.lock().unwrap();
+            let mut db_lock = db.lock().await;
             db_lock.replication_info.insert("role".to_string(), ReplicationInfoValue::StringValue("slave".to_string()));
             println!("Replication info updated to 'slave'.");
         }
 
-        match TcpStream::connect(address.clone()) {
+        match TcpStream::connect(address.clone()).await {
             Ok(mut stream) => {
                 println!("Connected to master at {}", address);
-                stream.write_all(b"*1\r\n$4\r\nPING\r\n").unwrap();
-                stream.set_nodelay(true).unwrap();
+                stream.write_all(b"*1\r\n$4\r\nPING\r\n").await;
+                stream.set_nodelay(true);
 
                 let mut buffer = vec![0; 512];
-                match stream.read(&mut buffer) {
+                match stream.read(&mut buffer).await {
                     Ok(_) => {
                         println!("Received PING response from master");
-                        let _ = send_replconf(&mut stream, port, db.clone(), config_map);
+                        let _ = send_replconf(&mut stream, port, db.clone(), config_map).await;
                     }
                     Err(e) => eprintln!("Failed to receive PING response: {}", e),
                 }
@@ -189,15 +189,11 @@ pub fn initialize_replication(
             Err(e) => eprintln!("Failed to connect to master at {}: {}", address, e),
         }
     } else {
-        let mut db_lock = db.lock().unwrap();
+        let mut db_lock = db.lock().await;
         db_lock.replication_info.insert("role".to_string(), ReplicationInfoValue::StringValue("master".to_string()));
         db_lock.replication_info.insert("master_replid".to_string(), ReplicationInfoValue::StringValue("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string()));
         if !db_lock.replication_info.contains_key("master_repl_offset") {
-            // If the master_repl_offset doesn't exist, initialize it to 0
-            db_lock.replication_info.insert(
-                "master_repl_offset".to_string(),
-                ReplicationInfoValue::ByteValue(0)
-            );
+            db_lock.replication_info.insert("master_repl_offset".to_string(), ReplicationInfoValue::ByteValue(0));
         }
         println!("Running as master.");
     }
