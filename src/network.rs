@@ -94,6 +94,23 @@ async fn handle_client(
                         let num_slaves = args[0].parse::<usize>().unwrap_or(0);
                         let timeout_ms = args[1].parse::<u64>().unwrap_or(0);
 
+                        // Send REPLCONF GETACK * to all slaves
+                        let slaves = {
+                            let db_lock = db.lock().await;
+                            db_lock.slave_connections.clone()
+                        };
+
+                        for slave_connection in slaves.iter() {
+                            let mut slave_stream = slave_connection.lock().await;
+                            if slave_stream.write_all(replconf_getack_message.as_bytes()).await.is_err() {
+                                println!("Failed to send REPLCONF GETACK to slave.");
+                                continue;
+                            }
+                            sent_replconf_getack = true;
+                            slave_stream.flush().await?;
+                        }
+
+                        // Wait until the WAIT condition is satisfied or timeout occurs
                         let wait_result = handle_wait_command(db.clone(), num_slaves, timeout_ms).await;
 
                         let wait_response = match wait_result {
