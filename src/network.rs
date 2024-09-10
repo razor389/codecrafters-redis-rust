@@ -262,13 +262,13 @@ async fn handle_wait_command(
     let timeout_duration = Duration::from_millis(timeout_ms);
     // Handle the timeout's result and the inner future's result
     match timeout(timeout_duration, async {
-        let mut db_lock = db.lock().await;
+        let db_lock = db.lock().await;
         loop {
             if db_lock.slave_connections.len() >= num_slaves {
                 return Ok(db_lock.slave_connections.len());
             }
             // Simulate checking if more slaves are ready
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            //tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }).await {
         // If the timeout elapses, return an error
