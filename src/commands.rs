@@ -135,7 +135,6 @@ pub fn handle_wait(db: &mut RedisDatabase, args: &[String], check_byte_length: b
             // Calculate remaining time
             let elapsed_time = start_time.elapsed();
             if elapsed_time >= timeout_duration {
-                println!("timeout already exceeded");
                 return 0; // Timeout already exceeded
             }
 
@@ -144,6 +143,7 @@ pub fn handle_wait(db: &mut RedisDatabase, args: &[String], check_byte_length: b
             if wait_for_ack(&mut slave_stream, remaining_time, replconf_byte_len, check_byte_length).is_ok() {
                 1 // Return 1 if the slave responds with an ACK
             } else {
+                println!("no valid ack received");
                 0 // Return 0 if no valid ACK is received
             }
         });
