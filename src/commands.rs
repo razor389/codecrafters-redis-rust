@@ -249,6 +249,7 @@ pub fn handle_wait_command(
     // Send REPLCONF GETACK to all slaves and wait for ACKs
     for slave_connection in slaves.iter() {
         let mut slave_stream = slave_connection.lock().unwrap();
+        println!("sending replconf getack to slave");
 
         // Send REPLCONF GETACK to the slave
         if slave_stream.write_all(replconf_getack_message.as_bytes()).is_err() {

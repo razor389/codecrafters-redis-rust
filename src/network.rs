@@ -72,7 +72,6 @@ fn handle_client(
 
             for (command, args, response,_,_) in parsed_results {
                 if command == Some("WAIT".to_string()) {
-                    println!("handling wait");
                     if args.len() != 2 {
                         let error_response = "-ERR wrong number of arguments for WAIT\r\n";
                         stream.write_all(error_response.as_bytes())?;
