@@ -148,7 +148,7 @@ fn handle_client(
                             {
                                 let wait_stream = wait_state.wait_stream.as_ref();
                                 let mut stream_lock = wait_stream.lock().unwrap();
-                                println!("wait stream: {:?}", wait_stream);
+                                println!("wait stream: {:?}", stream_lock);
                                 stream_lock.write_all(wait_response.as_bytes())?;
                                 stream_lock.flush()?;
                             }
