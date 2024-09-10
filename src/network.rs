@@ -54,6 +54,11 @@ async fn handle_client(
         println!("Waiting for data...");
 
         if bytes_read == 0 {
+            let db_lock = db.lock().await;
+            if let Some(ReplicationInfoValue::StringValue(value)) = db_lock.get_replication_info("role"){
+                println!("closing connection for role: {}" ,value);
+            }
+        
             println!("Connection closed by client.");
             return Ok(());
         }
