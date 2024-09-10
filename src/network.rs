@@ -212,15 +212,32 @@ fn send_full_resync_response(
     stream: &Arc<Mutex<TcpStream>>,
     db: &Arc<Mutex<RedisDatabase>>,
 ) -> std::io::Result<()> {
-    let mut stream_lock = stream.lock().unwrap();
-    stream_lock.write_all(response.as_bytes())?;
-    stream_lock.flush()?;
-    send_rdb_file(&mut stream_lock)?;
-    let stream_clone = stream_lock.try_clone()?;
-    let mut db_lock = db.lock().unwrap();
-    db_lock.slave_connections.push(Arc::new(Mutex::new(stream_clone)));
+    {
+        // Lock the stream and send the FULLRESYNC response
+        let mut stream_lock = stream.lock().unwrap();
+        stream_lock.write_all(response.as_bytes())?;
+        stream_lock.flush()?; // Flush to ensure the response is sent before the RDB file
+    }
+
+    {
+        // Lock the stream again and send the RDB file to the client (slave)
+        let mut stream_lock = stream.lock().unwrap();
+        send_rdb_file(&mut stream_lock)?; // Call the working send_rdb_file function
+        println!("Sent RDB file after FULLRESYNC");
+    }
+
+    {
+        // Add the slave connection to the list of slaves
+        let mut db_lock = db.lock().unwrap();
+        let stream_clone = stream.lock().unwrap().try_clone()?; // Clone the stream for slave connections
+        db_lock.slave_connections.push(Arc::new(Mutex::new(stream_clone))); // Add the new slave connection
+    }
+
+    println!("Added new slave after FULLRESYNC");
+
     Ok(())
 }
+
 
 fn send_response(response: &str, stream: &Arc<Mutex<TcpStream>>) -> std::io::Result<()> {
     let mut stream_lock = stream.lock().unwrap();
