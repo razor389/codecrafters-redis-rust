@@ -99,6 +99,7 @@ fn handle_client(
                 let replconf_getack_message = "*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n";
                 let replconf_getack_byte_len = replconf_getack_message.as_bytes().len();
                 if command == Some("WAIT".to_string()) {
+                    println!("got wait command");
                     if args.len() != 2 {
                         let error_response = "-ERR wrong number of arguments for WAIT\r\n";
                         {   
@@ -112,6 +113,7 @@ fn handle_client(
                 
                         // Activate the WAIT command in the database
                         {
+                            println!("activating wait command in db");
                             let mut db_lock = db.lock().unwrap();
                             db_lock.activate_wait_command(num_slaves, timeout_ms, stream.clone()); // Pass a clone of Arc<Mutex<TcpStream>>
                         }
@@ -137,6 +139,7 @@ fn handle_client(
 
                     let wait_state = db_lock.wait_state.as_mut();
                     if let Some(wait_state) = wait_state {
+                        println!("num slaves to wait for: {}, responding slaves: {}", wait_state.num_slaves_to_wait_for, wait_state.responding_slaves);
                         if wait_state.responding_slaves >= wait_state.num_slaves_to_wait_for {
                             let wait_response = format!(":{}\r\n", wait_state.responding_slaves);
                             
