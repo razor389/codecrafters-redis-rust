@@ -123,9 +123,9 @@ fn handle_client(
                     db_lock.increment_responding_slaves();
 
                     let wait_state = db_lock.wait_state.as_ref();
-                    println!("wait state: {:?}", wait_state);
+                    
                     if let Some(wait_state) = wait_state {
-                        println!("got here");
+                        println!("wait state: {:?}", wait_state);
                         if wait_state.responding_slaves >= wait_state.num_slaves_to_wait_for {
                             let wait_response = format!(":{}\r\n", wait_state.responding_slaves);
                             stream.write_all(wait_response.as_bytes())?;
