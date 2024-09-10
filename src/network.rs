@@ -121,6 +121,7 @@ async fn handle_client(
                             
                                     // Listen for REPLCONF ACK responses within the timeout period
                                     let wait_result = tokio::time::timeout(timeout_duration, async {
+                                        println!("got here in waiting loop");
                                         loop {
                                             let slaves = {
                                                 let db_lock = db.lock().await;
@@ -203,7 +204,6 @@ async fn handle_client(
 
                                             // Lock the database and clone the slave connections
                                             let slaves = {
-                                                println!("getting slave connections");
                                                 let db_lock = db.lock().await;
                                                 db_lock.slave_connections.clone()
                                             };
