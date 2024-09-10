@@ -45,6 +45,7 @@ fn handle_client(
     db: Arc<Mutex<RedisDatabase>>,
     config_map: &HashMap<String, String>,
 ) -> std::io::Result<()> {
+    println!("started handle client");
     let mut buffer = vec![0; 4096];
     let mut partial_message = String::new();
     let mut wait_command_active = false;
