@@ -1,10 +1,9 @@
 use crate::database::{RedisDatabase, RedisValue, ReplicationInfoValue};
 use crate::parsing::parse_redis_message;
 use std::collections::HashMap;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 
 // Handle the SET command
 pub fn handle_set(db: &mut RedisDatabase, args: &[String]) -> String {
@@ -225,88 +224,4 @@ pub fn process_commands_after_rdb(
     }
 
     Ok(())
-}
-
-pub fn handle_wait_command(
-    db: &Arc<Mutex<RedisDatabase>>,
-    num_slaves_to_wait_for: usize,
-    timeout_ms: u64,
-) -> usize {
-    let start_time = Instant::now();
-    let timeout_duration = Duration::from_millis(timeout_ms);
-
-    // REPLCONF GETACK * message
-    let replconf_getack_message = "*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n";
-
-    // Clone slave connections to avoid locking while waiting for ACKs
-    let slaves = {
-        let db_lock = db.lock().unwrap();
-        db_lock.slave_connections.clone()
-    };
-
-    let mut responding_slaves = 0;
-
-    // Send REPLCONF GETACK to all slaves and wait for ACKs
-    for slave_connection in slaves.iter() {
-        let mut slave_stream = slave_connection.lock().unwrap();
-        println!("sending replconf getack to slave");
-
-        // Send REPLCONF GETACK to the slave
-        if slave_stream.write_all(replconf_getack_message.as_bytes()).is_err() {
-            println!("Failed to send REPLCONF GETACK to slave.");
-            continue;
-        }
-
-        let _ = slave_stream.flush();
-
-        // Calculate remaining time
-        let elapsed_time = start_time.elapsed();
-        if elapsed_time >= timeout_duration {
-            break;
-        }
-
-        let remaining_time = timeout_duration - elapsed_time;
-
-        // Wait for the ACK from the slave
-        if let Ok(_) = wait_for_ack_from_slave_with_timeout(&mut slave_stream, remaining_time) {
-            responding_slaves += 1;
-        }
-
-        // If we have enough slaves, stop waiting
-        if responding_slaves >= num_slaves_to_wait_for {
-            break;
-        }
-    }
-
-    responding_slaves
-}
-
-// Function to wait for REPLCONF ACK from a slave with a timeout
-fn wait_for_ack_from_slave_with_timeout(slave_stream: &mut TcpStream, timeout: Duration) -> std::io::Result<()> {
-    let mut buffer = [0; 1024];
-
-    // Set a read timeout for ACK
-    slave_stream.set_read_timeout(Some(timeout))?;
-
-    // Read the response from the slave
-    let bytes_read = slave_stream.read(&mut buffer)?;
-    if bytes_read == 0 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::UnexpectedEof,
-            "Connection closed by slave",
-        ));
-    }
-
-    // Convert the response to a string
-    let response = String::from_utf8_lossy(&buffer[..bytes_read]);
-
-    // Check if the response contains the REPLCONF ACK
-    if response.contains("REPLCONF") && response.contains("ACK") {
-        Ok(()) // Successfully received ACK
-    } else {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "Invalid ACK from slave",
-        ))
-    }
 }

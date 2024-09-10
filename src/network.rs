@@ -3,7 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::net::{TcpListener, TcpStream};
 use std::io::{Read, Write};
 use std::thread;
-use crate::commands::{handle_wait_command, send_rdb_file};
+use std::time::{Duration, Instant};
+use crate::commands::send_rdb_file;
 use crate::database::{RedisDatabase, ReplicationInfoValue};
 use crate::parsing::parse_redis_message;
 
@@ -46,9 +47,22 @@ fn handle_client(
 ) -> std::io::Result<()> {
     let mut buffer = vec![0; 4096];
     let mut partial_message = String::new();
+    let mut wait_command_active = false;
+    let mut responding_slaves = 0;
+    let mut num_slaves_to_wait_for = 0;
+    let mut start_time = Instant::now();
+    let mut timeout_duration = Duration::from_millis(0);
 
     loop {
         println!("Waiting for data...");
+        // Check for timeout if we're in a WAIT command state
+        if wait_command_active && start_time.elapsed() >= timeout_duration {
+            let wait_response = format!(":{}\r\n", responding_slaves);
+            stream.write_all(wait_response.as_bytes())?;
+            stream.flush()?;
+            wait_command_active = false; // Reset wait state
+            responding_slaves = 0; // Reset the counter
+        }
 
         // Read data from the stream
         let bytes_read = stream.read(&mut buffer)?;
@@ -71,6 +85,9 @@ fn handle_client(
             };
 
             for (command, args, response,_,_) in parsed_results {
+                let mut sent_replconf_getack = false;
+                let replconf_getack_message = "*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n";
+                let replconf_getack_byte_len = replconf_getack_message.as_bytes().len();
                 if command == Some("WAIT".to_string()) {
                     if args.len() != 2 {
                         let error_response = "-ERR wrong number of arguments for WAIT\r\n";
@@ -78,16 +95,42 @@ fn handle_client(
                         stream.flush()?;
                     } else {
                         // Parse the number of slaves and the timeout from the arguments
-                        let num_slaves_to_wait_for = args[0].parse::<usize>().unwrap_or(0);
+                        num_slaves_to_wait_for = args[0].parse::<usize>().unwrap_or(0);
                         let timeout_ms = args[1].parse::<u64>().unwrap_or(0);
+                        timeout_duration = Duration::from_millis(timeout_ms);
+                        start_time = Instant::now(); // Start the timer for the WAIT command
 
-                        // Call handle_wait_command to wait for slave ACKs
-                        let responding_slaves = handle_wait_command(&db, num_slaves_to_wait_for, timeout_ms);
+                        // Send REPLCONF GETACK * to all slaves
+                        
+                        let slaves = {
+                            let db_lock = db.lock().unwrap();
+                            db_lock.slave_connections.clone()
+                        };
 
-                        // Return the number of responding slaves
-                        let wait_response = format!(":{}\r\n", responding_slaves);
-                        stream.write_all(wait_response.as_bytes())?;
-                        stream.flush()?;
+                        for slave_connection in slaves.iter() {
+                            let mut slave_stream = slave_connection.lock().unwrap();
+                            if slave_stream.write_all(replconf_getack_message.as_bytes()).is_err() {
+                                println!("Failed to send REPLCONF GETACK to slave.");
+                                continue;
+                            }
+                            sent_replconf_getack = true;
+                            slave_stream.flush()?;
+                        }
+                        
+                        wait_command_active = true; // Set WAIT command state to active
+                    }
+                } else if response.starts_with("REPLCONF") && response.contains("ACK") {
+                    if wait_command_active {
+                        responding_slaves += 1; // Count the ACK
+
+                        // Check if we have received enough ACKs
+                        if responding_slaves >= num_slaves_to_wait_for {
+                            let wait_response = format!(":{}\r\n", responding_slaves);
+                            stream.write_all(wait_response.as_bytes())?;
+                            stream.flush()?;
+                            wait_command_active = false; // Reset wait state
+                            responding_slaves = 0; // Reset the counter
+                        }
                     }
                 } else {
                     if response.starts_with("+FULLRESYNC") {
@@ -153,6 +196,26 @@ fn handle_client(
                                 }
                             }
                         }
+                    }
+                }
+                if sent_replconf_getack{
+                    let mut db_lock = db.lock().unwrap();
+                    // Increment the master_repl_offset in replication_info
+                    if let Some(ReplicationInfoValue::ByteValue(current_offset)) = db_lock.replication_info.get("master_repl_offset") {
+                        // Increment the offset by the number of bytes sent
+                        let new_offset = current_offset + replconf_getack_byte_len;
+            
+                        // Update the replication_info with the new offset as a ByteValue
+                        db_lock.replication_info.insert(
+                            "master_repl_offset".to_string(),
+                            ReplicationInfoValue::ByteValue(new_offset)
+                        );
+                    } else {
+                        // If the master_repl_offset does not exist, initialize it with the current bytes sent
+                        db_lock.replication_info.insert(
+                            "master_repl_offset".to_string(),
+                            ReplicationInfoValue::ByteValue(replconf_getack_byte_len)
+                        );
                     }
                 }
             }
