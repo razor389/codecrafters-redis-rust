@@ -63,7 +63,7 @@ fn handle_client(
         // Process all complete Redis messages
         while let Some(message_end) = get_end_of_redis_message(&partial_message) {
             let current_message = partial_message[..message_end].to_string();
-            println!("Received complete Redis message: {}", current_message);
+            println!("Received complete Redis message in network: {}", current_message);
 
             let parsed_results = {
                 let mut db_lock = db.lock().unwrap();
