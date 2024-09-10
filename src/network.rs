@@ -118,10 +118,10 @@ fn handle_client(
                         }
                         
                         wait_command_active = true; // Set WAIT command state to active
+                        println!("wait command active");
                     }
                 } else if command == Some("REPLCONF".to_string()) && args[0].to_uppercase()=="ACK" {
                     if wait_command_active {
-                        println!("slave ack");
                         responding_slaves += 1; // Count the ACK
 
                         // Check if we have received enough ACKs
