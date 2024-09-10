@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::net::{TcpListener, TcpStream};
 use std::io::{Read, Write};
 use std::thread;
-use crate::commands::send_rdb_file;
+use crate::commands::{handle_wait_command, send_rdb_file};
 use crate::database::{RedisDatabase, ReplicationInfoValue};
 use crate::parsing::parse_redis_message;
 
@@ -70,71 +70,91 @@ fn handle_client(
                 parse_redis_message(&current_message, &mut db_lock, config_map)
             };
 
-            for (command, _args, response,_,_) in parsed_results {
-                if response.starts_with("+FULLRESYNC") {
-                    // Send the FULLRESYNC response
-                    stream.write_all(response.as_bytes())?;
-                    stream.flush()?;
+            for (command, args, response,_,_) in parsed_results {
+                if command == Some("WAIT".to_string()) {
+                    println!("handling wait");
+                    if args.len() != 2 {
+                        let error_response = "-ERR wrong number of arguments for WAIT\r\n";
+                        stream.write_all(error_response.as_bytes())?;
+                        stream.flush()?;
+                    } else {
+                        // Parse the number of slaves and the timeout from the arguments
+                        let num_slaves_to_wait_for = args[0].parse::<usize>().unwrap_or(0);
+                        let timeout_ms = args[1].parse::<u64>().unwrap_or(0);
 
-                    // Send the RDB file to the client (slave)
-                    send_rdb_file(&mut stream)?;
-                    println!("Sent RDB file after FULLRESYNC");
+                        // Call handle_wait_command to wait for slave ACKs
+                        let responding_slaves = handle_wait_command(&db, num_slaves_to_wait_for, timeout_ms);
 
-                    // Add the slave connection to the list of slaves
-                    let mut db_lock = db.lock().unwrap();
-                    db_lock.slave_connections.push(Arc::new(Mutex::new(stream.try_clone()?)));
-                    println!("Added new slave after FULLRESYNC");
-
+                        // Return the number of responding slaves
+                        let wait_response = format!(":{}\r\n", responding_slaves);
+                        stream.write_all(wait_response.as_bytes())?;
+                        stream.flush()?;
+                    }
                 } else {
-                    // Write the response to the client
-                    println!("Sending response: {}", response);
-                    stream.write_all(response.as_bytes())?;
-                    stream.flush()?;
+                    if response.starts_with("+FULLRESYNC") {
+                        // Send the FULLRESYNC response
+                        stream.write_all(response.as_bytes())?;
+                        stream.flush()?;
 
-                    // Forward the command to all connected slaves if applicable
-                    if let Some(cmd) = command {
-                        if should_forward_to_slaves(&cmd) {
-                            // Calculate the length of the current message in bytes
-                            let bytes_sent = current_message.as_bytes().len();
-                    
-                            // Lock the database and clone the slave connections
-                            let slaves = {
-                                let db_lock = db.lock().unwrap();
-                                db_lock.slave_connections.clone()
-                            };
-                    
-                            // Forward the message to each slave
-                            for slave_connection in slaves.iter() {
-                                let mut slave_stream = slave_connection.lock().unwrap();
-                                println!("Forwarding message to slave: {}", current_message);
-                                
-                                // Write the original command to the slave's stream
-                                slave_stream.write_all(current_message.as_bytes())?;
-                                slave_stream.flush()?;
-                            }
-                    
-                            // Increment the master_repl_offset only once for the total bytes sent
-                            let mut db_lock = db.lock().unwrap();
-                            // Increment the master_repl_offset in replication_info
-                            if let Some(ReplicationInfoValue::ByteValue(current_offset)) = db_lock.replication_info.get("master_repl_offset") {
-                                // Increment the offset by the number of bytes sent
-                                let new_offset = current_offset + bytes_sent;
-                    
-                                // Update the replication_info with the new offset as a ByteValue
-                                db_lock.replication_info.insert(
-                                    "master_repl_offset".to_string(),
-                                    ReplicationInfoValue::ByteValue(new_offset)
-                                );
-                            } else {
-                                // If the master_repl_offset does not exist, initialize it with the current bytes sent
-                                db_lock.replication_info.insert(
-                                    "master_repl_offset".to_string(),
-                                    ReplicationInfoValue::ByteValue(bytes_sent)
-                                );
+                        // Send the RDB file to the client (slave)
+                        send_rdb_file(&mut stream)?;
+                        println!("Sent RDB file after FULLRESYNC");
+
+                        // Add the slave connection to the list of slaves
+                        let mut db_lock = db.lock().unwrap();
+                        db_lock.slave_connections.push(Arc::new(Mutex::new(stream.try_clone()?)));
+                        println!("Added new slave after FULLRESYNC");
+
+                    } else {
+                        // Write the response to the client
+                        println!("Sending response: {}", response);
+                        stream.write_all(response.as_bytes())?;
+                        stream.flush()?;
+
+                        // Forward the command to all connected slaves if applicable
+                        if let Some(cmd) = command {
+                            if should_forward_to_slaves(&cmd) {
+                                // Calculate the length of the current message in bytes
+                                let bytes_sent = current_message.as_bytes().len();
+                        
+                                // Lock the database and clone the slave connections
+                                let slaves = {
+                                    let db_lock = db.lock().unwrap();
+                                    db_lock.slave_connections.clone()
+                                };
+                        
+                                // Forward the message to each slave
+                                for slave_connection in slaves.iter() {
+                                    let mut slave_stream = slave_connection.lock().unwrap();
+                                    println!("Forwarding message to slave: {}", current_message);
+                                    
+                                    // Write the original command to the slave's stream
+                                    slave_stream.write_all(current_message.as_bytes())?;
+                                    slave_stream.flush()?;
+                                }
+                        
+                                // Increment the master_repl_offset only once for the total bytes sent
+                                let mut db_lock = db.lock().unwrap();
+                                // Increment the master_repl_offset in replication_info
+                                if let Some(ReplicationInfoValue::ByteValue(current_offset)) = db_lock.replication_info.get("master_repl_offset") {
+                                    // Increment the offset by the number of bytes sent
+                                    let new_offset = current_offset + bytes_sent;
+                        
+                                    // Update the replication_info with the new offset as a ByteValue
+                                    db_lock.replication_info.insert(
+                                        "master_repl_offset".to_string(),
+                                        ReplicationInfoValue::ByteValue(new_offset)
+                                    );
+                                } else {
+                                    // If the master_repl_offset does not exist, initialize it with the current bytes sent
+                                    db_lock.replication_info.insert(
+                                        "master_repl_offset".to_string(),
+                                        ReplicationInfoValue::ByteValue(bytes_sent)
+                                    );
+                                }
                             }
                         }
                     }
-                    
                 }
             }
 

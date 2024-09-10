@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::{Duration, Instant};
 
 // Handle the SET command
@@ -91,140 +90,9 @@ pub fn handle_info(db: &RedisDatabase, args: &[String]) -> String {
     }
 }
 
-// Handle the WAIT command with optional byte length matching and multi-threading
-pub fn handle_wait(db: &mut RedisDatabase, args: &[String], check_byte_length: bool) -> String {
-    if args.len() != 2 {
-        return "-ERR wrong number of arguments for WAIT\r\n".to_string();
-    }
-
-    // Parse the number of slaves to wait for
-    let num_slaves_to_wait_for: usize = match args[0].parse() {
-        Ok(n) => n,
-        Err(_) => return "-ERR invalid number of slaves\r\n".to_string(),
-    };
-
-    // Parse the timeout in milliseconds
-    let timeout_ms: u64 = match args[1].parse() {
-        Ok(t) => t,
-        Err(_) => return "-ERR invalid timeout value\r\n".to_string(),
-    };
-
-    // Start the timer to keep track of the elapsed time
-    let start_time = Instant::now();
-    let timeout_duration = Duration::from_millis(timeout_ms);
-
-    // Send REPLCONF GETACK * command to each slave
-    let replconf_getack_message = "*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n";
-    let replconf_byte_len = replconf_getack_message.as_bytes().len();
-
-    // Spawn a thread for each slave connection to wait for their ACKs
-    let mut handles = vec![];
-    for slave in db.slave_connections.iter() {
-        let slave_clone = Arc::clone(slave);
-
-        // Spawn a thread for each slave connection
-        let handle = thread::spawn(move || {
-            let mut slave_stream = slave_clone.lock().unwrap();
-            
-            // Send the REPLCONF GETACK * command
-            if slave_stream.write_all(replconf_getack_message.as_bytes()).is_err() {
-                return 0; // Return 0 if writing fails
-            }
-            let _ = slave_stream.flush();
-
-            // Calculate remaining time
-            let elapsed_time = start_time.elapsed();
-            if elapsed_time >= timeout_duration {
-                return 0; // Timeout already exceeded
-            }
-
-            // Wait for the acknowledgment on the slave's stream with the remaining time
-            let remaining_time = timeout_duration - elapsed_time;
-            if wait_for_ack(&mut slave_stream, remaining_time, replconf_byte_len, check_byte_length).is_ok() {
-                println!("slave responded with ack");
-                1 // Return 1 if the slave responds with an ACK
-            } else {
-                println!("no valid ack received");
-                0 // Return 0 if no valid ACK is received
-            }
-        });
-
-        // Store the handle to join the threads later
-        handles.push(handle);
-    }
-
-    // Collect the results from all the threads
-    let mut responding_slaves = 0;
-    for handle in handles {
-        responding_slaves += handle.join().unwrap_or(0); // Accumulate the number of successful ACKs
-        if responding_slaves >= num_slaves_to_wait_for {
-            break; // If we already have enough slaves, break early
-        }
-
-         // Check if the timeout has been exceeded
-         if start_time.elapsed() >= timeout_duration {
-            break; // Exit if timeout is exceeded
-        }
-    }
-
-    // Update the replication_info without locking
-    if let Some(ReplicationInfoValue::ByteValue(current_offset)) = db.replication_info.get("master_repl_offset") {
-        // Increment the offset by the number of bytes sent
-        let new_offset = current_offset + replconf_byte_len;
-
-        // Update the replication_info with the new offset as a ByteValue
-        db.replication_info.insert(
-            "master_repl_offset".to_string(),
-            ReplicationInfoValue::ByteValue(new_offset),
-        );
-    } else {
-        // If the master_repl_offset does not exist, initialize it with the current bytes sent
-        db.replication_info.insert(
-            "master_repl_offset".to_string(),
-            ReplicationInfoValue::ByteValue(replconf_byte_len),
-        );
-    }
-
-    // Return the count of responding slaves
-    format!(":{}\r\n", responding_slaves)
-}
-
-// A function that waits for an acknowledgment from a slave, optionally checking byte length
-fn wait_for_ack(slave_stream: &mut TcpStream, remaining_time: Duration, replconf_byte_len: usize, check_byte_length: bool) -> Result<(), ()> {
-    // Set the read timeout for the remaining time
-    slave_stream.set_read_timeout(Some(remaining_time)).ok();
-
-    // Buffer to store the incoming response
-    let mut buffer = [0; 1024];
-    
-    // Attempt to read from the stream
-    match slave_stream.read(&mut buffer) {
-        Ok(bytes_read) if bytes_read > 0 => {
-            let response = String::from_utf8_lossy(&buffer[..bytes_read]);
-
-            // Parse the response
-            if response.contains("REPLCONF") && response.contains("ACK") {
-                if check_byte_length {
-                    // Extract the bytes processed from the response
-                    if let Some(bytes_processed_str) = response.split("\r\n").last() {
-                        if let Ok(bytes_processed) = bytes_processed_str.parse::<usize>() {
-                            // If byte length matching is enabled, ensure the slave's replication offset is valid
-                            if bytes_processed >= replconf_byte_len {
-                                return Ok(()); // Slave has acknowledged
-                            }
-                        }
-                    }
-                    Err(()) // Byte length mismatch
-                } else {
-                    // No byte length checking, just return success if an ACK is found
-                    return Ok(());
-                }
-            } else {
-                Err(()) // No valid ACK found
-            }
-        }
-        _ => Err(()), // Error or no data received
-    }
+// wait command handled in network.rs
+pub fn handle_wait() -> String {
+    return "".to_string();
 }
 
 // Handle the REPLCONF command
@@ -359,3 +227,85 @@ pub fn process_commands_after_rdb(
     Ok(())
 }
 
+pub fn handle_wait_command(
+    db: &Arc<Mutex<RedisDatabase>>,
+    num_slaves_to_wait_for: usize,
+    timeout_ms: u64,
+) -> usize {
+    let start_time = Instant::now();
+    let timeout_duration = Duration::from_millis(timeout_ms);
+
+    // REPLCONF GETACK * message
+    let replconf_getack_message = "*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n";
+
+    // Clone slave connections to avoid locking while waiting for ACKs
+    let slaves = {
+        let db_lock = db.lock().unwrap();
+        db_lock.slave_connections.clone()
+    };
+
+    let mut responding_slaves = 0;
+
+    // Send REPLCONF GETACK to all slaves and wait for ACKs
+    for slave_connection in slaves.iter() {
+        let mut slave_stream = slave_connection.lock().unwrap();
+
+        // Send REPLCONF GETACK to the slave
+        if slave_stream.write_all(replconf_getack_message.as_bytes()).is_err() {
+            println!("Failed to send REPLCONF GETACK to slave.");
+            continue;
+        }
+
+        let _ = slave_stream.flush();
+
+        // Calculate remaining time
+        let elapsed_time = start_time.elapsed();
+        if elapsed_time >= timeout_duration {
+            break;
+        }
+
+        let remaining_time = timeout_duration - elapsed_time;
+
+        // Wait for the ACK from the slave
+        if let Ok(_) = wait_for_ack_from_slave_with_timeout(&mut slave_stream, remaining_time) {
+            responding_slaves += 1;
+        }
+
+        // If we have enough slaves, stop waiting
+        if responding_slaves >= num_slaves_to_wait_for {
+            break;
+        }
+    }
+
+    responding_slaves
+}
+
+// Function to wait for REPLCONF ACK from a slave with a timeout
+fn wait_for_ack_from_slave_with_timeout(slave_stream: &mut TcpStream, timeout: Duration) -> std::io::Result<()> {
+    let mut buffer = [0; 1024];
+
+    // Set a read timeout for ACK
+    slave_stream.set_read_timeout(Some(timeout))?;
+
+    // Read the response from the slave
+    let bytes_read = slave_stream.read(&mut buffer)?;
+    if bytes_read == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "Connection closed by slave",
+        ));
+    }
+
+    // Convert the response to a string
+    let response = String::from_utf8_lossy(&buffer[..bytes_read]);
+
+    // Check if the response contains the REPLCONF ACK
+    if response.contains("REPLCONF") && response.contains("ACK") {
+        Ok(()) // Successfully received ACK
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Invalid ACK from slave",
+        ))
+    }
+}

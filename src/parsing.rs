@@ -100,7 +100,7 @@ pub fn parse_redis_message(
                 Some("INFO") => handle_info(db, &args),
                 Some("REPLCONF") => handle_replconf(db,&args),
                 Some("PSYNC") => handle_psync(db, &args),
-                Some("WAIT") => handle_wait(db, &args, false),
+                Some("WAIT") => handle_wait(),
                 _ => "-ERR unknown command\r\n".to_string(),
             };
 
