@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::net::{TcpListener, TcpStream};
 use std::io::{Read, Write};
-use std::thread;
+use std::thread::{self, sleep};
+use std::time::{Duration, Instant};
 use crate::commands::send_rdb_file;
 use crate::database::{RedisDatabase, ReplicationInfoValue};
 use crate::parsing::parse_redis_message;
@@ -40,26 +41,19 @@ pub fn start_server(config_map: HashMap<String, String>, db: Arc<Mutex<RedisData
 }
 
 fn handle_client(
-    stream: TcpStream,
+    mut stream: TcpStream,
     db: Arc<Mutex<RedisDatabase>>,
     config_map: &HashMap<String, String>,
 ) -> std::io::Result<()> {
     println!("started handle client");
-    let stream = Arc::new(Mutex::new(stream));
     let mut buffer = vec![0; 4096];
     let mut partial_message = String::new();
 
     loop {
         println!("Waiting for data...");
 
-        // Check if WAIT command has timed out
-        check_wait_timeout(&db)?;
-
         // Read data from the stream
-        let bytes_read = {
-            let mut stream_lock = stream.lock().unwrap();
-            stream_lock.read(&mut buffer)?
-        };
+        let bytes_read = stream.read(&mut buffer)?;
         if bytes_read == 0 {
             println!("Connection closed by client.");
             break;
@@ -86,11 +80,8 @@ fn handle_client(
                     println!("got wait command");
                     if args.len() != 2 {
                         let error_response = "-ERR wrong number of arguments for WAIT\r\n";
-                        {   
-                            let mut stream_lock = stream.lock().unwrap();
-                            stream_lock.write_all(error_response.as_bytes())?;
-                            stream_lock.flush()?;
-                        }
+                        stream.write_all(error_response.as_bytes())?;
+                        stream.flush()?;
                     } else {
                         let num_slaves = args[0].parse::<usize>().unwrap_or(0);
                         let timeout_ms = args[1].parse::<u64>().unwrap_or(0);
@@ -100,14 +91,7 @@ fn handle_client(
                             println!("activating wait command in db");
                             println!("wait stream: {:?}", stream);
                             let mut db_lock = db.lock().unwrap();
-                            db_lock.activate_wait_command(num_slaves, timeout_ms, stream.clone()); // Pass a clone of Arc<Mutex<TcpStream>>
-                            let wait_response = format!(":{}\r\n", 1);
-                            {
-                                let mut stream_lock = stream.lock().unwrap();
-                                println!("stream lock: {:?}", stream_lock);
-                                stream_lock.write_all(wait_response.as_bytes())?;
-                                stream_lock.flush()?;
-                            }
+                            db_lock.activate_wait_command(num_slaves, timeout_ms); 
                         }
                         // Send REPLCONF GETACK * to all slaves
                         let slaves = {
@@ -124,53 +108,35 @@ fn handle_client(
                             sent_replconf_getack = true;
                             slave_stream.flush()?;
                         }
+
+                        // Spin until the WAIT condition is satisfied or timeout occurs
+                        spin_until_wait_resolved(db.clone(), &mut stream, timeout_ms)?;
                     }
                 } else if command == Some("REPLCONF".to_string()) && args[0].to_uppercase()=="ACK" {
                     let mut db_lock = db.lock().unwrap();
                     db_lock.increment_responding_slaves();
-
-                    let wait_state = db_lock.wait_state.as_mut();
-                    if let Some(wait_state) = wait_state {
-                        println!("num slaves to wait for: {}, responding slaves: {}", wait_state.num_slaves_to_wait_for, wait_state.responding_slaves);
-                        if wait_state.responding_slaves >= wait_state.num_slaves_to_wait_for {
-                            let wait_response = format!(":{}\r\n", wait_state.responding_slaves);
-                            {
-                                let wait_stream = wait_state.wait_stream.as_ref();
-                                println!("waiting on lock");
-                                let mut stream_lock = wait_stream.lock().unwrap();
-                                println!("wait stream: {:?}", stream_lock);
-                                stream_lock.write_all(wait_response.as_bytes())?;
-                                stream_lock.flush()?;
-                            }
-                            // Reset the WAIT state
-                            db_lock.reset_wait_state();
-                        }
-                    }
                 } else {
                     if response.starts_with("+FULLRESYNC") {
                         // Send the FULLRESYNC response
-                        let mut stream_lock = stream.lock().unwrap();
-                        stream_lock.write_all(response.as_bytes())?;
-                        stream_lock.flush()?;
+                        stream.write_all(response.as_bytes())?;
+                        stream.flush()?;
 
 
                         // Send the RDB file to the client (slave)
-                        send_rdb_file(&mut stream_lock)?;
+                        send_rdb_file(&mut stream)?;
                         println!("Sent RDB file after FULLRESYNC");
 
                         // Add the slave connection to the list of slaves
                         let mut db_lock = db.lock().unwrap();
-                        let stream_clone = stream_lock.try_clone()?;
-                        db_lock.slave_connections.push(Arc::new(Mutex::new(stream_clone)));
+                        db_lock.slave_connections.push(Arc::new(Mutex::new(stream.try_clone()?)));
 
                         println!("Added new slave after FULLRESYNC");
 
                     } else {
                         // Write the response to the client
                         println!("Sending response: {}", response);
-                        let mut stream_lock = stream.lock().unwrap();
-                        stream_lock.write_all(response.as_bytes())?;
-                        stream_lock.flush()?;
+                        stream.write_all(response.as_bytes())?;
+                        stream.flush()?;
 
 
                         // Forward the command to all connected slaves if applicable
@@ -282,18 +248,54 @@ fn should_forward_to_slaves(command: &str) -> bool {
     }
 }
 
-fn check_wait_timeout(db: &Arc<Mutex<RedisDatabase>>) -> std::io::Result<()> {
-    let mut db_lock = db.lock().unwrap();
-    if let Some(responding_slaves) = db_lock.check_wait_timeout() {
-        println!("wait timed out");
-        let wait_response = format!(":{}\r\n", responding_slaves);
-        {
-            let wait_stream = &mut db_lock.wait_state.as_mut().unwrap().wait_stream;
-            let mut stream_lock = wait_stream.lock().unwrap();
-            stream_lock.write_all(wait_response.as_bytes())?;
-            stream_lock.flush()?;
+fn spin_until_wait_resolved(
+    db: Arc<Mutex<RedisDatabase>>,
+    stream: &mut TcpStream,
+    timeout_ms: u64,
+) -> std::io::Result<()> {
+    let start_time = Instant::now();
+    
+    loop {
+        // Check if we've hit the timeout
+        if start_time.elapsed() >= Duration::from_millis(timeout_ms) {
+            let mut db_lock = db.lock().unwrap();
+            if let Some(responding_slaves) = db_lock.check_wait_timeout() {
+                println!("WAIT command timed out.");
+                let wait_response = format!(":{}\r\n", responding_slaves);
+                stream.write_all(wait_response.as_bytes())?;
+                stream.flush()?;
+                // Reset the WAIT state in the database
+                db_lock.reset_wait_state();
+            }
+            break;
         }
-        db_lock.reset_wait_state();
+
+        // Check if enough slaves have responded
+        {
+            let mut db_lock = db.lock().unwrap();
+            let wait_state = db_lock.wait_state.as_mut();
+            if let Some(wait_state) = wait_state {
+                println!(
+                    "Checking WAIT state: num_slaves_to_wait_for = {}, responding_slaves = {}",
+                    wait_state.num_slaves_to_wait_for, wait_state.responding_slaves
+                );
+
+                if wait_state.responding_slaves >= wait_state.num_slaves_to_wait_for {
+                    // If we have enough slave responses, send the response to the client
+                    let wait_response = format!(":{}\r\n", wait_state.responding_slaves);
+                    stream.write_all(wait_response.as_bytes())?;
+                    stream.flush()?;
+
+                    // Reset the WAIT state in the database
+                    db_lock.reset_wait_state();
+                    break;
+                }
+            }
+        }
+
+        // Sleep for a short period before the next check to avoid busy-waiting
+        sleep(Duration::from_millis(100));
     }
+
     Ok(())
 }
