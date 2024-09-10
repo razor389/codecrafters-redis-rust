@@ -143,17 +143,14 @@ fn handle_client(
                         println!("num slaves to wait for: {}, responding slaves: {}", wait_state.num_slaves_to_wait_for, wait_state.responding_slaves);
                         if wait_state.responding_slaves >= wait_state.num_slaves_to_wait_for {
                             let wait_response = format!(":{}\r\n", wait_state.responding_slaves);
-                            
-                            // Write the response to the original wait stream
                             {
                                 let wait_stream = wait_state.wait_stream.as_ref();
+                                println!("waiting on lock");
                                 let mut stream_lock = wait_stream.lock().unwrap();
                                 println!("wait stream: {:?}", stream_lock);
                                 stream_lock.write_all(wait_response.as_bytes())?;
                                 stream_lock.flush()?;
                             }
-                            
-
                             // Reset the WAIT state
                             db_lock.reset_wait_state();
                         }
