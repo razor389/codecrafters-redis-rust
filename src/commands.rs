@@ -1,9 +1,10 @@
 use crate::database::{RedisDatabase, RedisValue, ReplicationInfoValue};
 use crate::parsing::parse_redis_message;
 use std::collections::HashMap;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{Duration, Instant};
 
 // Handle the SET command
@@ -90,8 +91,8 @@ pub fn handle_info(db: &RedisDatabase, args: &[String]) -> String {
     }
 }
 
-// Handle the WAIT command
-pub fn handle_wait(db: &RedisDatabase, args: &[String]) -> String {
+// Handle the WAIT command with optional byte length matching and multi-threading
+pub fn handle_wait(db: &mut RedisDatabase, args: &[String], check_byte_length: bool) -> String {
     if args.len() != 2 {
         return "-ERR wrong number of arguments for WAIT\r\n".to_string();
     }
@@ -108,58 +109,122 @@ pub fn handle_wait(db: &RedisDatabase, args: &[String]) -> String {
         Err(_) => return "-ERR invalid timeout value\r\n".to_string(),
     };
 
-    // Start timer to keep track of the elapsed time
+    // Start the timer to keep track of the elapsed time
     let start_time = Instant::now();
     let timeout_duration = Duration::from_millis(timeout_ms);
 
-    // Loop until either the required number of slaves match or the timeout occurs
-    loop {
-        // Get master_repl_offset from replication_info
-        let master_repl_offset = match db.get_replication_info("master_repl_offset") {
-            Some(ReplicationInfoValue::ByteValue(offset)) => *offset,
-            _ => return "-ERR master replication offset not found or invalid\r\n".to_string(),
-        };
+    // Send REPLCONF GETACK * command to each slave
+    let replconf_getack_message = "*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n";
+    let replconf_byte_len = replconf_getack_message.as_bytes().len();
 
-        // Debug: Print the master offset
-        //println!("Master replication offset: {}", master_repl_offset);
+    // Spawn a thread for each slave connection to wait for their ACKs
+    let mut handles = vec![];
+    for slave in db.slave_connections.iter() {
+        let slave_clone = Arc::clone(slave);
 
-        // Count how many slaves have matched the master_repl_offset
-        let matching_slaves = db
-            .slave_connections
-            .iter()
-            .filter(|slave_connection| {
-                let slave_connection = slave_connection.lock().unwrap();
-                let slave_id = format!("slave_repl_offset_{}", slave_connection.peer_addr().unwrap());
+        // Spawn a thread for each slave connection
+        let handle = thread::spawn(move || {
+            let mut slave_stream = slave_clone.lock().unwrap();
+            
+            // Send the REPLCONF GETACK * command
+            if slave_stream.write_all(replconf_getack_message.as_bytes()).is_err() {
+                return 0; // Return 0 if writing fails
+            }
+            let _ = slave_stream.flush();
 
-                // Get the slave's replication offset from replication_info
-                if let Some(ReplicationInfoValue::ByteValue(slave_offset)) = db.get_replication_info(&slave_id) {
-                    // Debug: Print the slave offset and comparison
-                    println!("Slave {} replication offset: {}", slave_connection.peer_addr().unwrap(), slave_offset);
-                    println!("Comparing slave offset ({}) with master offset ({})", slave_offset, master_repl_offset);
+            // Calculate remaining time
+            let elapsed_time = start_time.elapsed();
+            if elapsed_time >= timeout_duration {
+                return 0; // Timeout already exceeded
+            }
 
-                    return *slave_offset >= master_repl_offset;
-                } else {
-                    //println!("No replication info found for slave {}", slave_connection.peer_addr().unwrap());
-                }
-                false
-            })
-            .count();
+            // Wait for the acknowledgment on the slave's stream with the remaining time
+            let remaining_time = timeout_duration - elapsed_time;
+            if wait_for_ack(&mut slave_stream, remaining_time, replconf_byte_len, check_byte_length).is_ok() {
+                1 // Return 1 if the slave responds with an ACK
+            } else {
+                0 // Return 0 if no valid ACK is received
+            }
+        });
 
-        // Debug: Print the number of matching slaves
-        //println!("Matching slaves: {}", matching_slaves);
+        // Store the handle to join the threads later
+        handles.push(handle);
+    }
 
-        // If we have enough matching slaves, return the count
-        if matching_slaves >= num_slaves_to_wait_for {
-            return format!(":{}\r\n", matching_slaves);
+    // Collect the results from all the threads
+    let mut responding_slaves = 0;
+    for handle in handles {
+        responding_slaves += handle.join().unwrap_or(0); // Accumulate the number of successful ACKs
+        if responding_slaves >= num_slaves_to_wait_for {
+            break; // If we already have enough slaves, break early
         }
 
-        // Check if timeout has been exceeded
-        if start_time.elapsed() >= timeout_duration {
-            // Return the number of slaves that matched before the timeout
-            return format!(":{}\r\n", matching_slaves);
+         // Check if the timeout has been exceeded
+         if start_time.elapsed() >= timeout_duration {
+            break; // Exit if timeout is exceeded
         }
     }
+
+    // Update the replication_info without locking
+    if let Some(ReplicationInfoValue::ByteValue(current_offset)) = db.replication_info.get("master_repl_offset") {
+        // Increment the offset by the number of bytes sent
+        let new_offset = current_offset + replconf_byte_len;
+
+        // Update the replication_info with the new offset as a ByteValue
+        db.replication_info.insert(
+            "master_repl_offset".to_string(),
+            ReplicationInfoValue::ByteValue(new_offset),
+        );
+    } else {
+        // If the master_repl_offset does not exist, initialize it with the current bytes sent
+        db.replication_info.insert(
+            "master_repl_offset".to_string(),
+            ReplicationInfoValue::ByteValue(replconf_byte_len),
+        );
+    }
+
+    // Return the count of responding slaves
+    format!(":{}\r\n", responding_slaves)
 }
+
+// A function that waits for an acknowledgment from a slave, optionally checking byte length
+fn wait_for_ack(slave_stream: &mut TcpStream, remaining_time: Duration, replconf_byte_len: usize, check_byte_length: bool) -> Result<(), ()> {
+    // Set the read timeout for the remaining time
+    slave_stream.set_read_timeout(Some(remaining_time)).ok();
+
+    // Buffer to store the incoming response
+    let mut buffer = [0; 1024];
+    
+    // Attempt to read from the stream
+    match slave_stream.read(&mut buffer) {
+        Ok(bytes_read) if bytes_read > 0 => {
+            let response = String::from_utf8_lossy(&buffer[..bytes_read]);
+
+            // Parse the response
+            if response.contains("REPLCONF") && response.contains("ACK") {
+                if check_byte_length {
+                    // Extract the bytes processed from the response
+                    if let Some(bytes_processed_str) = response.split("\r\n").last() {
+                        if let Ok(bytes_processed) = bytes_processed_str.parse::<usize>() {
+                            // If byte length matching is enabled, ensure the slave's replication offset is valid
+                            if bytes_processed >= replconf_byte_len {
+                                return Ok(()); // Slave has acknowledged
+                            }
+                        }
+                    }
+                    Err(()) // Byte length mismatch
+                } else {
+                    // No byte length checking, just return success if an ACK is found
+                    return Ok(());
+                }
+            } else {
+                Err(()) // No valid ACK found
+            }
+        }
+        _ => Err(()), // Error or no data received
+    }
+}
+
 // Handle the REPLCONF command
 pub fn handle_replconf(db: &RedisDatabase, args: &[String]) -> String {
     if args.len() == 2 && args[0].to_uppercase() == "GETACK" && args[1] == "*" {

@@ -111,12 +111,6 @@ fn handle_client(
                                 // Write the original command to the slave's stream
                                 slave_stream.write_all(current_message.as_bytes())?;
                                 slave_stream.flush()?;
-                    
-                                // After forwarding, send the REPLCONF GETACK * command
-                                let replconf_getack_message = "*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n";
-                                println!("Sending REPLCONF GETACK * to slave");
-                                slave_stream.write_all(replconf_getack_message.as_bytes())?;
-                                slave_stream.flush()?;
                             }
                     
                             // Increment the master_repl_offset only once for the total bytes sent
