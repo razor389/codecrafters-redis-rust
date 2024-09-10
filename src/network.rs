@@ -138,11 +138,14 @@ fn handle_command(
             // Match REPLCONF with ACK
             ("REPLCONF", Some(ref arg)) if arg == "ACK" => handle_replconf_ack(db)?,
             
-            // Match WAIT command (no need to check the argument here)
+            // Match WAIT command
             ("WAIT", _) => handle_wait_command(&args, stream, db)?,
+
+            //match FULLRESYNC
+            ("FULLRESYNC", _) => send_full_resync_response(response, stream, db)?,
             
-            // Default handling for other commands
-            _ => handle_default_command(cmd, response, stream, db)?,
+            // Default handling for other commands, including forwarding to slaves
+            _ => handle_default_command(cmd, &args, response, stream, db)?,
         }
     }
     Ok(())
@@ -187,20 +190,22 @@ fn handle_wait_command(args: &[String], stream: &Arc<Mutex<TcpStream>>, db: &Arc
 
 fn handle_default_command(
     command: &str,
+    args: &[String],
     response: String,
     stream: &Arc<Mutex<TcpStream>>,
     db: &Arc<Mutex<RedisDatabase>>,
 ) -> std::io::Result<()> {
-    if response.starts_with("+FULLRESYNC") {
-        send_full_resync_response(response, stream, db)?;
-    } else {
-        send_response(&response, stream)?;
-        if should_forward_to_slaves(command) {
-            forward_command_to_slaves(command, db)?;
-        }
+    // Send the response to the client
+    send_response(&response, stream)?;
+
+    // Forward the command and args to slaves if applicable
+    if should_forward_to_slaves(command) {
+        forward_command_to_slaves(command, args, db)?;
     }
+
     Ok(())
 }
+
 
 fn send_full_resync_response(
     response: String,
@@ -245,17 +250,29 @@ fn send_replconf_getack_to_slaves(db: &Arc<Mutex<RedisDatabase>>) -> std::io::Re
     Ok(())
 }
 
-fn forward_command_to_slaves(command: &str, db: &Arc<Mutex<RedisDatabase>>) -> std::io::Result<()> {
-    let current_message = format!("*1\r\n${}\r\n{}\r\n", command.len(), command);
+fn forward_command_to_slaves(
+    command: &str,
+    args: &[String],
+    db: &Arc<Mutex<RedisDatabase>>,
+) -> std::io::Result<()> {
+    // Format the command and its arguments in RESP format
+    let mut message = format!("*{}\r\n${}\r\n{}\r\n", args.len() + 1, command.len(), command);
+    for arg in args {
+        message.push_str(&format!("${}\r\n{}\r\n", arg.len(), arg));
+    }
+
     let slaves = {
         let db_lock = db.lock().unwrap();
         db_lock.slave_connections.clone()
     };
+
+    // Send the message to all connected slaves
     for slave_connection in slaves.iter() {
         let mut slave_stream = slave_connection.lock().unwrap();
-        slave_stream.write_all(current_message.as_bytes())?;
+        slave_stream.write_all(message.as_bytes())?;
         slave_stream.flush()?;
     }
+
     Ok(())
 }
 
