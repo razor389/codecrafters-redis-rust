@@ -189,7 +189,6 @@ pub fn handle_wait(db: &mut RedisDatabase, args: &[String], check_byte_length: b
 
 // A function that waits for an acknowledgment from a slave, optionally checking byte length
 fn wait_for_ack(slave_stream: &mut TcpStream, remaining_time: Duration, replconf_byte_len: usize, check_byte_length: bool) -> Result<(), ()> {
-    println!("waiting for ack from slave");
     // Set the read timeout for the remaining time
     slave_stream.set_read_timeout(Some(remaining_time)).ok();
 
@@ -203,6 +202,7 @@ fn wait_for_ack(slave_stream: &mut TcpStream, remaining_time: Duration, replconf
 
             // Parse the response
             if response.contains("REPLCONF") && response.contains("ACK") {
+                println!("got ack response");
                 if check_byte_length {
                     // Extract the bytes processed from the response
                     if let Some(bytes_processed_str) = response.split("\r\n").last() {
