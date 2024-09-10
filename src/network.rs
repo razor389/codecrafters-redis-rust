@@ -294,7 +294,7 @@ fn spin_until_wait_resolved(
         }
 
         // Sleep for a short period before the next check to avoid busy-waiting
-        //sleep(Duration::from_millis(10));
+        sleep(Duration::from_millis(200));
     }
 
     Ok(())
