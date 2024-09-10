@@ -93,7 +93,6 @@ pub fn handle_info(db: &RedisDatabase, args: &[String]) -> String {
 
 // Handle the WAIT command with optional byte length matching and multi-threading
 pub fn handle_wait(db: &mut RedisDatabase, args: &[String], check_byte_length: bool) -> String {
-    println!("Handling wait command");
     if args.len() != 2 {
         return "-ERR wrong number of arguments for WAIT\r\n".to_string();
     }
@@ -190,6 +189,7 @@ pub fn handle_wait(db: &mut RedisDatabase, args: &[String], check_byte_length: b
 
 // A function that waits for an acknowledgment from a slave, optionally checking byte length
 fn wait_for_ack(slave_stream: &mut TcpStream, remaining_time: Duration, replconf_byte_len: usize, check_byte_length: bool) -> Result<(), ()> {
+    println!("waiting for ack from slave");
     // Set the read timeout for the remaining time
     slave_stream.set_read_timeout(Some(remaining_time)).ok();
 
