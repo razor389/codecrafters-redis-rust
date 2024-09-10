@@ -275,10 +275,10 @@ fn spin_until_wait_resolved(
             let mut db_lock = db.lock().unwrap();
             let wait_state = db_lock.wait_state.as_mut();
             if let Some(wait_state) = wait_state {
-                println!(
-                    "Checking WAIT state: num_slaves_to_wait_for = {}, responding_slaves = {}",
-                    wait_state.num_slaves_to_wait_for, wait_state.responding_slaves
-                );
+                //println!(
+                //    "Checking WAIT state: num_slaves_to_wait_for = {}, responding_slaves = {}",
+                //    wait_state.num_slaves_to_wait_for, wait_state.responding_slaves
+                //);
 
                 if wait_state.responding_slaves >= wait_state.num_slaves_to_wait_for {
                     // If we have enough slave responses, send the response to the client
