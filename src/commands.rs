@@ -141,6 +141,7 @@ pub fn handle_wait(db: &mut RedisDatabase, args: &[String], check_byte_length: b
             // Wait for the acknowledgment on the slave's stream with the remaining time
             let remaining_time = timeout_duration - elapsed_time;
             if wait_for_ack(&mut slave_stream, remaining_time, replconf_byte_len, check_byte_length).is_ok() {
+                println!("slave responded with ack");
                 1 // Return 1 if the slave responds with an ACK
             } else {
                 println!("no valid ack received");
