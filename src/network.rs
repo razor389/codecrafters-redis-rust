@@ -99,11 +99,11 @@ async fn handle_client(
                                     let num_slaves = args[0].parse::<usize>().unwrap_or(0);
                                     let timeout_ms = args[1].parse::<u64>().unwrap_or(0);
                                     let mut responding_slaves = 0;
-                            
+                                    let db_lock = db.lock().await;
                                     // Send REPLCONF GETACK * to all slaves
                                     let slaves = {
-                                        let db_lock = db.lock().await;
-                                        db_lock.slave_connections.clone()
+                                        
+                                        db_lock.slave_connections.read().await.clone()
                                     };
                             
                                     for slave_connection in slaves.iter() {
@@ -115,7 +115,7 @@ async fn handle_client(
                                         sent_replconf_getack = true;
                                         slave_stream.flush().await?;
                                     }
-                            
+                                
                                     // Start the timeout for the WAIT command
                                     let timeout_duration = tokio::time::Duration::from_millis(timeout_ms);
                             
@@ -124,8 +124,7 @@ async fn handle_client(
                                         println!("got here in waiting loop");
                                         loop {
                                             let slaves = {
-                                                let db_lock = db.lock().await;
-                                                db_lock.slave_connections.clone()
+                                                db_lock.slave_connections.read().await.clone()
                                             };
                             
                                             for slave_connection in slaves.iter() {
@@ -184,8 +183,8 @@ async fn handle_client(
                                     }
                                     {
                                         // Add the slave connection to the list of slaves
-                                        let mut db_lock = db.lock().await;
-                                        db_lock.slave_connections.push(Arc::clone(&stream));
+                                        let db_lock = db.lock().await;
+                                        db_lock.slave_connections.write().await.push(Arc::clone(&stream));
                                     }
                                     println!("Added new slave after FULLRESYNC");
                                 } else {
@@ -202,11 +201,11 @@ async fn handle_client(
                                             println!("forwarding to slaves: {}", cmd);
                                             // Calculate the length of the current message in bytes
                                             let bytes_sent = current_message.as_bytes().len();
-
+                                            let db_lock = db.lock().await;
                                             // Lock the database and clone the slave connections
                                             let slaves = {
-                                                let db_lock = db.lock().await;
-                                                db_lock.slave_connections.clone()
+                                                
+                                                db_lock.slave_connections.read().await.clone()
                                             };
                                             // Forward the message to each slave
                                             for slave_connection in slaves.iter() {

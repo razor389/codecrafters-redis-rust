@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tokio::net::TcpStream;
 use std::sync::Arc;
 use std::fmt;
@@ -25,7 +25,7 @@ impl fmt::Display for ReplicationInfoValue {
 pub struct RedisDatabase {
     pub data: HashMap<String, RedisValue>,
     pub replication_info: HashMap<String, ReplicationInfoValue>, // Changed to use the enum
-    pub slave_connections: Vec<Arc<Mutex<TcpStream>>>, // Changed to store multiple slave connections
+    pub slave_connections: RwLock<Vec<Arc<Mutex<TcpStream>>>>, // Changed to store multiple slave connections
 }
 
 impl RedisDatabase {
@@ -33,7 +33,7 @@ impl RedisDatabase {
         Self {
             data: HashMap::new(),
             replication_info: HashMap::new(),
-            slave_connections: vec![],
+            slave_connections: vec![].into(),
         }
     }
 
