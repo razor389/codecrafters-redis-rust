@@ -168,9 +168,7 @@ async fn handle_client(
                                     db_lock.slave_connections.write().await.push(Arc::clone(&stream));
                                 }
                                 println!("Added new slave after FULLRESYNC");
-                                // Yield control to allow other tasks (like SET) to run
-                                tokio::task::yield_now().await;
-                                
+
                             } else {
                                 // Write the response to the client
                                 println!("Sending response: {}", response);
