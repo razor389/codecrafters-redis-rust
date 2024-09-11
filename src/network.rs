@@ -116,6 +116,7 @@ async fn handle_client(
                                     let result = tokio::time::timeout(timeout_duration, async {
                                         while responding_slaves < num_slaves {
                                             // Await an ACK message from the broadcaster
+                                            println!("waiting for ack message from broadcaster");
                                             match receiver.recv().await {
                                                 Ok(ack) => {
                                                     if ack.contains("REPLCONF ACK") {
