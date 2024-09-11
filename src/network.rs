@@ -124,6 +124,7 @@ async fn handle_client(
                                     let response = {
                                         let db_lock = db.lock().await;
                                         let final_ack_count = *db_lock.ack_counter.lock().await;
+                                        println!("final ack count: {}", final_ack_count);
                                         match result {
                                             Ok(_) => format!(":{}\r\n", final_ack_count),
                                             Err(_) => format!(":0\r\n"), // Timeout
