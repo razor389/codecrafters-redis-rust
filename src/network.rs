@@ -94,38 +94,43 @@ async fn handle_client(
                                     let num_slaves = args[0].parse::<usize>().unwrap_or(0);
                                     let timeout_ms = args[1].parse::<u64>().unwrap_or(0);
                                     let mut responding_slaves = 0;
+                                    let db_lock = db.lock().await;
+                                    // Send REPLCONF GETACK * to all connected slaves
+                                    let slaves = {
+                                        db_lock.slave_connections.read().await.clone() // Clone slave connections list
+                                    };
 
-                                    // Send REPLCONF GETACK * to all slaves via broadcast
-                                    {
-                                        println!("trying to get db lock for replconf getack");
-                                        let db_lock = db.lock().await;
-                                        println!("got db lock for replconf getack");
-                                        db_lock.broadcaster.send(replconf_getack_message.to_string()).expect("Failed to broadcast REPLCONF GETACK");
-                                        println!("sent replconf getack");
+                                    for slave_stream in &slaves {
+                                        let mut slave_stream = slave_stream.lock().await;
+                                        slave_stream.write_all(replconf_getack_message.as_bytes()).await?;
+                                        slave_stream.flush().await?;
                                     }
 
                                     sent_replconf_getack = true;
 
                                     // Start the timeout for the WAIT command
                                     let timeout_duration = tokio::time::Duration::from_millis(timeout_ms);
-                                    // Subscribe to the broadcast channel (only once, outside the loop)
-                                    let mut receiver = db.lock().await.broadcaster.subscribe();
-
                                     // Listen for REPLCONF ACK responses within the timeout period
-                                    // Wait for the required number of ACKs
                                     let result = tokio::time::timeout(timeout_duration, async {
                                         while responding_slaves < num_slaves {
-                                            // Await an ACK message from the broadcaster
-                                            println!("waiting for ack message from broadcaster");
-                                            match receiver.recv().await {
-                                                Ok(ack) => {
-                                                    if ack.contains("REPLCONF ACK") {
-                                                        responding_slaves += 1;
+                                            for slave_stream in &slaves {
+                                                let mut slave_stream = slave_stream.lock().await;
+                                                let mut ack_buf = vec![0; 512];
+                                                match slave_stream.read(&mut ack_buf).await {
+                                                    Ok(n) if n == 0 => {
+                                                        println!("Slave disconnected.");
+                                                        break;
                                                     }
-                                                }
-                                                Err(e) => {
-                                                    eprintln!("Error receiving from slave: {:?}", e);
-                                                    break; // Handle errors in receiving the broadcast
+                                                    Ok(n) => {
+                                                        let response = String::from_utf8_lossy(&ack_buf[..n]);
+                                                        if response.contains("REPLCONF ACK") {
+                                                            responding_slaves += 1;
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        eprintln!("Error reading from slave: {:?}", e);
+                                                        break;
+                                                    }
                                                 }
                                             }
                                         }
@@ -163,21 +168,7 @@ async fn handle_client(
                                     db_lock.slave_connections.write().await.push(Arc::clone(&stream));
                                 }
 
-                                 // Subscribe this slave to the broadcaster
-                                 let mut receiver = db.lock().await.broadcaster.subscribe();
-                                 let stream_clone = Arc::clone(&stream); // Use the cloned Arc
- 
-                                 tokio::spawn(async move {
-                                     while let Ok(message) = receiver.recv().await {
-                                         let mut stream_lock = stream_clone.lock().await;
-                                         if let Err(e) = stream_lock.write_all(message.as_bytes()).await {
-                                             eprintln!("Error sending message to slave: {:?}", e);
-                                             break;
-                                         }
-                                     }
-                                 });
-
-                                // Spawn task to listen for REPLCONF ACK from this slave
+                                 // Spawn task to listen for REPLCONF ACK from this slave
                                 let stream_clone_for_ack = Arc::clone(&stream); // Clone again for ACK handling
                                 tokio::spawn(async move {
                                     let mut buf = vec![0; 512];
@@ -216,10 +207,19 @@ async fn handle_client(
                                 if let Some(cmd) = command {
                                     if should_forward_to_slaves(&cmd) {
                                         println!("Forwarding to slaves: {}", cmd);
-
-                                        // Broadcast the message to all slaves
                                         let mut db_lock = db.lock().await;
-                                        db_lock.broadcaster.send(current_message.clone()).expect("Failed to broadcast message");
+                                        // Forward the message to all connected slaves
+                                        let slaves = {
+                                            
+                                            db_lock.slave_connections.read().await.clone()
+                                        };
+
+                                        for slave_stream in slaves {
+                                            let mut slave_stream = slave_stream.lock().await;
+                                            if let Err(e) = slave_stream.write_all(current_message.as_bytes()).await {
+                                                eprintln!("Error sending message to slave: {:?}", e);
+                                            }
+                                        }
 
                                         // Increment the master_repl_offset only once for the total bytes sent
                                         let bytes_sent = current_message.as_bytes().len();
