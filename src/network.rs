@@ -156,7 +156,7 @@ async fn handle_client(
                                         println!("final ack count: {}", final_ack_count);
                                         match result {
                                             Ok(_) => format!(":{}\r\n", final_ack_count),
-                                            Err(_) => format!(":0\r\n"), // Timeout
+                                            Err(_) => format!(":{}\r\n", final_ack_count), // Timeout
                                         }
                                     };
 
