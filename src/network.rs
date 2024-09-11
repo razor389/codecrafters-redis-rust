@@ -47,6 +47,7 @@ async fn handle_client(
     let writer = Arc::new(Mutex::new(writer)); // Wrap the TcpStream in an Arc<Mutex>
     let mut buffer = vec![0; 4096];
     let mut partial_message = String::new();
+    let mut has_sent_commands_to_slaves = false;
 
     // Set the connection timeout duration (for example, 30 seconds)
     let connection_timeout = Duration::from_secs(30);
@@ -91,81 +92,96 @@ async fn handle_client(
                                     stream_lock.flush().await?;
                                 } else {
                                     let num_slaves = args[0].parse::<usize>().unwrap_or(0);
-                                    println!("num slaves to wait for: {}", num_slaves);
+                                    
                                     let timeout_ms = args[1].parse::<u64>().unwrap_or(0);
-                                    println!("timeout ms: {}", timeout_ms);
-                                    {   
-                                        println!("waiting to lock db to write getack to slave streams");
-                                        let mut db_lock = db.lock().await;
-                                        println!("locked db to write getack to slave streams");
-                                        // Send REPLCONF GETACK * to all connected slaves
+                                    if has_sent_commands_to_slaves == false{
+                                        println!("hasnt sent command to slaves, waiting on db lock");
+                                        let db_lock = db.lock().await;
+                                        println!("locked db to get num slaves");
+                                        
                                         let slaves = {
                                             db_lock.slave_connections.read().await.clone() // Clone slave connections list
                                         };
+                                        let response = format!(":{}\r\n", slaves.len());
 
-                                        
-                                        if slaves.len() > 0{
-                                            if let Some(ReplicationInfoValue::ByteValue(current_offset)) = db_lock.replication_info.get("master_repl_offset") {
-                                                let new_offset = current_offset + replconf_getack_byte_len;
-                                                db_lock.replication_info.insert(
-                                                    "master_repl_offset".to_string(),
-                                                    ReplicationInfoValue::ByteValue(new_offset),
-                                                );
-                                            } else {
-                                                db_lock.replication_info.insert(
-                                                    "master_repl_offset".to_string(),
-                                                    ReplicationInfoValue::ByteValue(replconf_getack_byte_len),
-                                                );
-                                            }
-                                        }
-                                        for slave_stream in &slaves {
-                                            let mut slave_stream = slave_stream.lock().await;
-                                            slave_stream.write_all(replconf_getack_message.as_bytes()).await?;
-                                            slave_stream.flush().await?;
-                                        }
-                                        println!("releasing db lock after getack write");
-                                    }
-                                    // Wait for REPLCONF ACKs or timeout
-                                    let timeout_duration = tokio::time::Duration::from_millis(timeout_ms);
-                                    let result = tokio::time::timeout(timeout_duration, async {
-                                        loop {
-                                            //println!("locking ack counter");
-                                            let ack_counter_value = {
-                                                // Only lock the ack_counter, not the whole db
-                                                let db_lock = db.lock().await;
-                                                let ack_counter = db_lock.ack_counter.lock().await;
-                                                *ack_counter
-                                            };
-                                    
-                                            //println!("current ack counter: {}", ack_counter_value);
+                                        writer.lock().await.write_all(response.as_bytes()).await?;
+                                        writer.lock().await.flush().await?;
+
+                                    } 
+                                    else{
+                                        // Send REPLCONF GETACK * to all connected slaves
+                                        {   
+                                            println!("waiting to lock db to write getack to slave streams");
+                                            let mut db_lock = db.lock().await;
+                                            println!("locked db to write getack to slave streams");
                                             
-                                            if ack_counter_value >= num_slaves {
-                                                break; // All required slaves have sent REPLCONF ACKs
+                                            let slaves = {
+                                                db_lock.slave_connections.read().await.clone() // Clone slave connections list
+                                            };
+                                            
+                                            if slaves.len() > 0{
+                                                if let Some(ReplicationInfoValue::ByteValue(current_offset)) = db_lock.replication_info.get("master_repl_offset") {
+                                                    let new_offset = current_offset + replconf_getack_byte_len;
+                                                    db_lock.replication_info.insert(
+                                                        "master_repl_offset".to_string(),
+                                                        ReplicationInfoValue::ByteValue(new_offset),
+                                                    );
+                                                } else {
+                                                    db_lock.replication_info.insert(
+                                                        "master_repl_offset".to_string(),
+                                                        ReplicationInfoValue::ByteValue(replconf_getack_byte_len),
+                                                    );
+                                                }
                                             }
+                                            for slave_stream in &slaves {
+                                                let mut slave_stream = slave_stream.lock().await;
+                                                slave_stream.write_all(replconf_getack_message.as_bytes()).await?;
+                                                slave_stream.flush().await?;
+                                            }
+                                            println!("releasing db lock after getack write");
+                                        }
+                                        // Wait for REPLCONF ACKs or timeout
+                                        let timeout_duration = tokio::time::Duration::from_millis(timeout_ms);
+                                        let result = tokio::time::timeout(timeout_duration, async {
+                                            loop {
+                                                //println!("locking ack counter");
+                                                let ack_counter_value = {
+                                                    // Only lock the ack_counter, not the whole db
+                                                    let db_lock = db.lock().await;
+                                                    let ack_counter = db_lock.ack_counter.lock().await;
+                                                    *ack_counter
+                                                };
+                                        
+                                                //println!("current ack counter: {}", ack_counter_value);
+                                                
+                                                if ack_counter_value >= num_slaves {
+                                                    break; // All required slaves have sent REPLCONF ACKs
+                                                }
+                                        
+                                                // Sleep briefly before checking again
+                                                tokio::time::sleep(Duration::from_millis(1)).await;
+                                            }
+                                            println!("finished waiting for ACKs");
+                                            Ok::<(), ()>(())
+                                        }).await;
                                     
-                                            // Sleep briefly before checking again
-                                            tokio::time::sleep(Duration::from_millis(1)).await;
-                                        }
-                                        println!("finished waiting for ACKs");
-                                        Ok::<(), ()>(())
-                                    }).await;
-                                
-                                    let response = {
-                                        let db_lock = db.lock().await;
-                                        let final_ack_count = *db_lock.ack_counter.lock().await;
-                                        println!("final ack count: {}", final_ack_count);
-                                        match result {
-                                            Ok(_) => format!(":{}\r\n", final_ack_count),
-                                            Err(_) => format!(":{}\r\n", final_ack_count), // Timeout
-                                        }
-                                    };
+                                        let response = {
+                                            let db_lock = db.lock().await;
+                                            let final_ack_count = *db_lock.ack_counter.lock().await;
+                                            println!("final ack count: {}", final_ack_count);
+                                            match result {
+                                                Ok(_) => format!(":{}\r\n", final_ack_count),
+                                                Err(_) => format!(":{}\r\n", final_ack_count), // Timeout
+                                            }
+                                        };
 
-                                    writer.lock().await.write_all(response.as_bytes()).await?;
-                                    writer.lock().await.flush().await?;
-                                    let db_lock = db.lock().await;
-                                    let mut ack_counter_lock = db_lock.ack_counter.lock().await;
-                                    *ack_counter_lock = 0;
-                                    println!("reset Ack counter to {}", *ack_counter_lock);
+                                        writer.lock().await.write_all(response.as_bytes()).await?;
+                                        writer.lock().await.flush().await?;
+                                        let db_lock = db.lock().await;
+                                        let mut ack_counter_lock = db_lock.ack_counter.lock().await;
+                                        *ack_counter_lock = 0;
+                                        println!("reset Ack counter to {}", *ack_counter_lock);
+                                    }
                                 }
                             } // Detect and handle "REPLCONF ACK" message
                             else if command == Some("REPLCONF".to_string())&& args[0].to_string() == "ACK" {
@@ -224,6 +240,7 @@ async fn handle_client(
                                             if let Err(e) = slave_stream.write_all(current_message.as_bytes()).await {
                                                 eprintln!("Error sending message to slave: {:?}", e);
                                             }
+                                            has_sent_commands_to_slaves = true;
                                         }
 
                                         // Increment the master_repl_offset only once for the total bytes sent
