@@ -82,7 +82,7 @@ async fn handle_client(
                             let mut sent_replconf_getack = false;
                             let replconf_getack_message = "*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n";
                             let replconf_getack_byte_len = replconf_getack_message.as_bytes().len();
-
+                            println!("command: {:?}, args: {:?}", command, args);
                             if command == Some("WAIT".to_string()) {
                                 println!("Got WAIT command");
                                 if args.len() != 2 {
