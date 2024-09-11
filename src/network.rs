@@ -191,6 +191,7 @@ async fn handle_client(
 
                                         for slave_stream in slaves {
                                             let mut slave_stream = slave_stream.lock().await;
+                                            println!("got slave stream lock");
                                             if let Err(e) = slave_stream.write_all(current_message.as_bytes()).await {
                                                 eprintln!("Error sending message to slave: {:?}", e);
                                             }
