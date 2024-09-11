@@ -51,10 +51,12 @@ async fn handle_client(
     let connection_timeout = Duration::from_secs(30);
 
     while let Ok(bytes_read) = timeout(connection_timeout, async {
+        println!("taking stream lock to read to buffer");
         let mut stream_lock = stream.lock().await;
         stream_lock.read(&mut buffer).await
     })
     .await {
+        println!("read, dropping stream lock");
         match bytes_read {
             Ok(bytes_read) => {
                 if bytes_read == 0 {
