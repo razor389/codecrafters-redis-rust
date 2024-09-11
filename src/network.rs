@@ -43,8 +43,7 @@ async fn handle_client(
     db: Arc<Mutex<RedisDatabase>>,
     config_map: &HashMap<String, String>,
 ) -> std::io::Result<()> {
-    let stream = Arc::new(Mutex::new(stream));
-
+    let stream = Arc::new(Mutex::new(stream)); // Wrap the TcpStream in an Arc<Mutex>
     let mut buffer = vec![0; 4096];
     let mut partial_message = String::new();
 
@@ -55,21 +54,17 @@ async fn handle_client(
         let mut stream_lock = stream.lock().await;
         stream_lock.read(&mut buffer).await
     })
-    .await{
+    .await {
         match bytes_read {
             Ok(bytes_read) => {
-                println!("Waiting for data...");
-
                 if bytes_read == 0 {
                     let db_lock = db.lock().await;
-                    if let Some(ReplicationInfoValue::StringValue(value)) = db_lock.get_replication_info("role"){
-                        println!("closing connection for role: {}" ,value);
+                    if let Some(ReplicationInfoValue::StringValue(value)) = db_lock.get_replication_info("role") {
+                        println!("Closing connection for role: {}", value);
                     }
-                
                     println!("Connection closed by client.");
                     return Ok(());
-                }else{
-
+                } else {
                     // Append the newly read data to the partial message buffer
                     partial_message.push_str(&String::from_utf8_lossy(&buffer[..bytes_read]));
 
@@ -89,7 +84,7 @@ async fn handle_client(
                             let replconf_getack_byte_len = replconf_getack_message.as_bytes().len();
 
                             if command == Some("WAIT".to_string()) {
-                                println!("got wait command");
+                                println!("Got WAIT command");
                                 if args.len() != 2 {
                                     let error_response = "-ERR wrong number of arguments for WAIT\r\n";
                                     let mut stream_lock = stream.lock().await;
@@ -99,140 +94,141 @@ async fn handle_client(
                                     let num_slaves = args[0].parse::<usize>().unwrap_or(0);
                                     let timeout_ms = args[1].parse::<u64>().unwrap_or(0);
                                     let mut responding_slaves = 0;
-                                    let db_lock = db.lock().await;
-                                    // Send REPLCONF GETACK * to all slaves
-                                    let slaves = {
-                                        
-                                        db_lock.slave_connections.read().await.clone()
-                                    };
-                            
-                                    for slave_connection in slaves.iter() {
-                                        let mut slave_stream = slave_connection.lock().await;
-                                        if slave_stream.write_all(replconf_getack_message.as_bytes()).await.is_err() {
-                                            println!("Failed to send REPLCONF GETACK to slave.");
-                                            continue;
-                                        }
-                                        sent_replconf_getack = true;
-                                        slave_stream.flush().await?;
+
+                                    // Send REPLCONF GETACK * to all slaves via broadcast
+                                    {
+                                        let db_lock = db.lock().await;
+                                        db_lock.broadcaster.send(replconf_getack_message.to_string()).expect("Failed to broadcast REPLCONF GETACK");
                                     }
-                                
+
+                                    sent_replconf_getack = true;
+
                                     // Start the timeout for the WAIT command
                                     let timeout_duration = tokio::time::Duration::from_millis(timeout_ms);
-                            
+                                    // Subscribe to the broadcast channel (only once, outside the loop)
+                                    let mut receiver = db.lock().await.broadcaster.subscribe();
+
                                     // Listen for REPLCONF ACK responses within the timeout period
-                                    let wait_result = tokio::time::timeout(timeout_duration, async {
-                                        println!("got here in waiting loop");
-                                        loop {
-                                            let slaves = {
-                                                db_lock.slave_connections.read().await.clone()
-                                            };
-                            
-                                            for slave_connection in slaves.iter() {
-                                                let mut slave_stream = slave_connection.lock().await;
-                                                let mut buffer = vec![0; 512]; // Adjust the buffer size as needed
-                            
-                                                match slave_stream.read(&mut buffer).await {
-                                                    Ok(bytes_read) => {
-                                                        if bytes_read == 0 {
-                                                            continue; // No response from this slave
-                                                        }
-                            
-                                                        let response = String::from_utf8_lossy(&buffer[..bytes_read]);
-                                                        if response.contains("*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK") {
-                                                            responding_slaves += 1;
-                                                            if responding_slaves >= num_slaves {
-                                                                return Ok::<usize, ()>(responding_slaves); // All slaves have responded
-                                                            }
-                                                        }
-                                                    }
-                                                    Err(e) => {
-                                                        println!("Error reading from slave: {:?}", e);
-                                                        continue;
+                                    // Wait for the required number of ACKs
+                                    let result = tokio::time::timeout(timeout_duration, async {
+                                        while responding_slaves < num_slaves {
+                                            // Await an ACK message from the broadcaster
+                                            match receiver.recv().await {
+                                                Ok(ack) => {
+                                                    if ack.contains("REPLCONF ACK") {
+                                                        responding_slaves += 1;
                                                     }
                                                 }
+                                                Err(e) => {
+                                                    eprintln!("Error receiving from slave: {:?}", e);
+                                                    break; // Handle errors in receiving the broadcast
+                                                }
                                             }
-                            
-                                            // Sleep briefly to avoid busy-looping
-                                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                                         }
+                                        Ok::<(), ()>(())
                                     }).await;
-                            
+
                                     // Check the result of the wait
-                                    let wait_response = match wait_result {
-                                        Ok(Ok(responding_slaves)) => format!(":{}\r\n", responding_slaves),
-                                        Ok(Err(_)) | Err(_) => format!(":0\r\n"), // Either timeout or an internal error
+                                    // Send the result back to the client
+                                    let response = match result {
+                                        Ok(_) => format!(":{}\r\n", responding_slaves),
+                                        Err(_) => format!(":0\r\n"), // Timeout or an error occurred
                                     };
 
-                            
                                     let mut stream_lock = stream.lock().await;
-                                    stream_lock.write_all(wait_response.as_bytes()).await?;
+                                    stream_lock.write_all(response.as_bytes()).await?;
                                     stream_lock.flush().await?;
                                 }
-                            
+                            } else if response.starts_with("+FULLRESYNC") {
+                                // Send the FULLRESYNC response
+                                {
+                                    let mut stream_lock = stream.lock().await;
+                                    stream_lock.write_all(response.as_bytes()).await?;
+                                    stream_lock.flush().await?;
+                                }
+                                // Send the RDB file to the client (slave)
+                                {
+                                    let mut stream_lock = stream.lock().await;
+                                    send_rdb_file(&mut *stream_lock).await?;
+                                    println!("Sent RDB file after FULLRESYNC");
+                                }
+
+                                // Add the slave to the slave connections list
+                                {
+                                    let db_lock = db.lock().await;
+                                    db_lock.slave_connections.write().await.push(Arc::clone(&stream));
+                                }
+
+                                 // Subscribe this slave to the broadcaster
+                                 let mut receiver = db.lock().await.broadcaster.subscribe();
+                                 let stream_clone = Arc::clone(&stream); // Use the cloned Arc
+ 
+                                 tokio::spawn(async move {
+                                     while let Ok(message) = receiver.recv().await {
+                                         let mut stream_lock = stream_clone.lock().await;
+                                         if let Err(e) = stream_lock.write_all(message.as_bytes()).await {
+                                             eprintln!("Error sending message to slave: {:?}", e);
+                                             break;
+                                         }
+                                     }
+                                 });
+
+                                // Spawn task to listen for REPLCONF ACK from this slave
+                                let stream_clone_for_ack = Arc::clone(&stream); // Clone again for ACK handling
+                                tokio::spawn(async move {
+                                    let mut buf = vec![0; 512];
+                                    loop {
+                                        let mut stream_lock = stream_clone_for_ack.lock().await;
+                                        match stream_lock.read(&mut buf).await {
+                                            Ok(n) if n == 0 => {
+                                                println!("Slave disconnected");
+                                                break;
+                                            }
+                                            Ok(n) => {
+                                                let response = String::from_utf8_lossy(&buf[..n]);
+                                                if response.contains("REPLCONF ACK") {
+                                                    println!("Received REPLCONF ACK from slave");
+                                                    // Handle ACK (e.g., update replication info)
+                                                }
+                                            }
+                                            Err(e) => {
+                                                eprintln!("Error reading from slave: {:?}", e);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                });
+                                println!("Added new slave after FULLRESYNC");
                             } else {
-                                if response.starts_with("+FULLRESYNC") {
-                                    // Send the FULLRESYNC response
-                                    {
-                                        let mut stream_lock = stream.lock().await;
-                                        stream_lock.write_all(response.as_bytes()).await?;
-                                        stream_lock.flush().await?;
-                                
-                                        // Send the RDB file to the client (slave)
-                                        send_rdb_file(&mut *stream_lock).await?;
-                                        println!("Sent RDB file after FULLRESYNC");
-                                    }
-                                    {
-                                        // Add the slave connection to the list of slaves
-                                        let db_lock = db.lock().await;
-                                        db_lock.slave_connections.write().await.push(Arc::clone(&stream));
-                                    }
-                                    println!("Added new slave after FULLRESYNC");
-                                } else {
-                                    // Write the response to the client
-                                    println!("Sending response: {}", response);
-                                    {
-                                        let mut stream_lock = stream.lock().await;
-                                        stream_lock.write_all(response.as_bytes()).await?;
-                                        stream_lock.flush().await?;
-                                    }
-                                    // Forward the command to all connected slaves if applicable
-                                    if let Some(cmd) = command {
-                                        if should_forward_to_slaves(&cmd) {
-                                            println!("forwarding to slaves: {}", cmd);
-                                            // Calculate the length of the current message in bytes
-                                            let bytes_sent = current_message.as_bytes().len();
-                                            let db_lock = db.lock().await;
-                                            // Lock the database and clone the slave connections
-                                            let slaves = {
-                                                
-                                                db_lock.slave_connections.read().await.clone()
-                                            };
-                                            // Forward the message to each slave
-                                            for slave_connection in slaves.iter() {
-                                                let mut slave_stream = slave_connection.lock().await;
-                                                println!("Forwarding message to slave: {}", current_message);
+                                // Write the response to the client
+                                println!("Sending response: {}", response);
+                                let mut stream_lock = stream.lock().await;
+                                stream_lock.write_all(response.as_bytes()).await?;
+                                stream_lock.flush().await?;
 
-                                                // Write the original command to the slave's stream
-                                                slave_stream.write_all(current_message.as_bytes()).await?;
-                                                slave_stream.flush().await?;
-                                            }
 
-                                            // Increment the master_repl_offset only once for the total bytes sent
-                                            let mut db_lock = db.lock().await;
-                                            if let Some(ReplicationInfoValue::ByteValue(current_offset)) =
-                                                db_lock.replication_info.get("master_repl_offset")
-                                            {
-                                                let new_offset = current_offset + bytes_sent;
-                                                db_lock.replication_info.insert(
-                                                    "master_repl_offset".to_string(),
-                                                    ReplicationInfoValue::ByteValue(new_offset),
-                                                );
-                                            } else {
-                                                db_lock.replication_info.insert(
-                                                    "master_repl_offset".to_string(),
-                                                    ReplicationInfoValue::ByteValue(bytes_sent),
-                                                );
-                                            }
+                                // Forward the command to all connected slaves if applicable
+                                if let Some(cmd) = command {
+                                    if should_forward_to_slaves(&cmd) {
+                                        println!("Forwarding to slaves: {}", cmd);
+
+                                        // Broadcast the message to all slaves
+                                        let mut db_lock = db.lock().await;
+                                        db_lock.broadcaster.send(current_message.clone()).expect("Failed to broadcast message");
+
+                                        // Increment the master_repl_offset only once for the total bytes sent
+                                        let bytes_sent = current_message.as_bytes().len();
+                                        if let Some(ReplicationInfoValue::ByteValue(current_offset)) = db_lock.replication_info.get("master_repl_offset") {
+                                            let new_offset = current_offset + bytes_sent;
+                                            db_lock.replication_info.insert(
+                                                "master_repl_offset".to_string(),
+                                                ReplicationInfoValue::ByteValue(new_offset),
+                                            );
+                                        } else {
+                                            db_lock.replication_info.insert(
+                                                "master_repl_offset".to_string(),
+                                                ReplicationInfoValue::ByteValue(bytes_sent),
+                                            );
                                         }
                                     }
                                 }
@@ -258,7 +254,6 @@ async fn handle_client(
                         // Remove the processed message from the partial buffer
                         partial_message.drain(..message_end);
                     }
-                
                 }
             }
             Err(e) => {
@@ -267,9 +262,9 @@ async fn handle_client(
                 return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "Read operation timed out"));
             }
         }
-    }    
+    }
 
-    println!("connection timeout reached. closing connection");
+    println!("Connection timeout reached. Closing connection");
     Ok(())
 }
 
