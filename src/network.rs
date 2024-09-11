@@ -79,7 +79,6 @@ async fn handle_client(
                         };
 
                         for (command, args, response, _, _) in parsed_results {
-                            let mut sent_replconf_getack = false;
                             let replconf_getack_message = "*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n";
                             let replconf_getack_byte_len = replconf_getack_message.as_bytes().len();
                             
@@ -95,7 +94,7 @@ async fn handle_client(
                                     let timeout_ms = args[1].parse::<u64>().unwrap_or(0);
                                     
                                     {
-                                        let db_lock = db.lock().await;
+                                        let mut db_lock = db.lock().await;
                                         // Send REPLCONF GETACK * to all connected slaves
                                         let slaves = {
                                             db_lock.slave_connections.read().await.clone() // Clone slave connections list
@@ -107,7 +106,18 @@ async fn handle_client(
                                             slave_stream.flush().await?;
                                         }
                                         if slaves.len() > 0{
-                                            sent_replconf_getack = true;
+                                            if let Some(ReplicationInfoValue::ByteValue(current_offset)) = db_lock.replication_info.get("master_repl_offset") {
+                                                let new_offset = current_offset + replconf_getack_byte_len;
+                                                db_lock.replication_info.insert(
+                                                    "master_repl_offset".to_string(),
+                                                    ReplicationInfoValue::ByteValue(new_offset),
+                                                );
+                                            } else {
+                                                db_lock.replication_info.insert(
+                                                    "master_repl_offset".to_string(),
+                                                    ReplicationInfoValue::ByteValue(replconf_getack_byte_len),
+                                                );
+                                            }
                                         }
                                     }
                                     // Wait for REPLCONF ACKs or timeout
@@ -211,22 +221,6 @@ async fn handle_client(
                                         }
                                     }
                                 }
-                            }
-
-                            if sent_replconf_getack {
-                                let mut db_lock = db.lock().await;
-                                let new_offset = db_lock
-                                    .replication_info
-                                    .get("master_repl_offset")
-                                    .map(|offset| match offset {
-                                        ReplicationInfoValue::ByteValue(current_offset) => current_offset + replconf_getack_byte_len,
-                                        _ => replconf_getack_byte_len,
-                                    })
-                                    .unwrap_or(replconf_getack_byte_len);
-                                db_lock.replication_info.insert(
-                                    "master_repl_offset".to_string(),
-                                    ReplicationInfoValue::ByteValue(new_offset),
-                                );
                             }
                         }
 
