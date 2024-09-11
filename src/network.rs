@@ -138,7 +138,7 @@ async fn handle_client(
                                     println!("reset Ack counter to {}", *ack_counter_lock);
                                 }
                             } // Detect and handle "REPLCONF ACK" message
-                            else if response.starts_with("REPLCONF") && args[0].to_string() == "ACK" {
+                            else if command == Some("REPLCONF".to_string())&& args[0].to_string() == "ACK" {
                                 // Increment the ack_counter inside the db
                                 println!("got replconf ack, waiting for db lock");
                                 let db_lock = db.lock().await;
