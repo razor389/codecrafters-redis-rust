@@ -43,7 +43,8 @@ async fn handle_client(
     db: Arc<Mutex<RedisDatabase>>,
     config_map: &HashMap<String, String>,
 ) -> std::io::Result<()> {
-    let stream = Arc::new(Mutex::new(stream)); // Wrap the TcpStream in an Arc<Mutex>
+    let (mut reader, writer) = stream.into_split(); // Split stream into reader and writer
+    let writer = Arc::new(Mutex::new(writer)); // Wrap the TcpStream in an Arc<Mutex>
     let mut buffer = vec![0; 4096];
     let mut partial_message = String::new();
 
@@ -51,9 +52,7 @@ async fn handle_client(
     let connection_timeout = Duration::from_secs(30);
 
     while let Ok(bytes_read) = timeout(connection_timeout, async {
-        println!("taking stream lock to read to buffer");
-        let mut stream_lock = stream.lock().await;
-        stream_lock.read(&mut buffer).await
+        reader.read(&mut buffer).await
     })
     .await {
         println!("read, dropping stream lock");
@@ -89,77 +88,72 @@ async fn handle_client(
                                 println!("Got WAIT command");
                                 if args.len() != 2 {
                                     let error_response = "-ERR wrong number of arguments for WAIT\r\n";
-                                    let mut stream_lock = stream.lock().await;
+                                    let mut stream_lock = writer.lock().await;
                                     stream_lock.write_all(error_response.as_bytes()).await?;
                                     stream_lock.flush().await?;
                                 } else {
                                     let num_slaves = args[0].parse::<usize>().unwrap_or(0);
                                     let timeout_ms = args[1].parse::<u64>().unwrap_or(0);
-                                    let mut responding_slaves = 0;
-                                    let db_lock = db.lock().await;
-                                    // Send REPLCONF GETACK * to all connected slaves
-                                    let slaves = {
-                                        db_lock.slave_connections.read().await.clone() // Clone slave connections list
-                                    };
+                                    
+                                    {
+                                        let db_lock = db.lock().await;
+                                        // Send REPLCONF GETACK * to all connected slaves
+                                        let slaves = {
+                                            db_lock.slave_connections.read().await.clone() // Clone slave connections list
+                                        };
 
-                                    for slave_stream in &slaves {
-                                        let mut slave_stream = slave_stream.lock().await;
-                                        slave_stream.write_all(replconf_getack_message.as_bytes()).await?;
-                                        slave_stream.flush().await?;
+                                        for slave_stream in &slaves {
+                                            let mut slave_stream = slave_stream.lock().await;
+                                            slave_stream.write_all(replconf_getack_message.as_bytes()).await?;
+                                            slave_stream.flush().await?;
+                                        }
+                                        if slaves.len() > 0{
+                                            sent_replconf_getack = true;
+                                        }
                                     }
-
-                                    sent_replconf_getack = true;
-
-                                    // Start the timeout for the WAIT command
+                                    // Wait for REPLCONF ACKs or timeout
                                     let timeout_duration = tokio::time::Duration::from_millis(timeout_ms);
-                                    // Listen for REPLCONF ACK responses within the timeout period
                                     let result = tokio::time::timeout(timeout_duration, async {
-                                        while responding_slaves < num_slaves {
-                                            for slave_stream in &slaves {
-                                                let mut slave_stream = slave_stream.lock().await;
-                                                let mut ack_buf = vec![0; 512];
-                                                match slave_stream.read(&mut ack_buf).await {
-                                                    Ok(n) if n == 0 => {
-                                                        println!("Slave disconnected.");
-                                                        break;
-                                                    }
-                                                    Ok(n) => {
-                                                        let response = String::from_utf8_lossy(&ack_buf[..n]);
-                                                        if response.contains("REPLCONF ACK") {
-                                                            responding_slaves += 1;
-                                                        }
-                                                    }
-                                                    Err(e) => {
-                                                        eprintln!("Error reading from slave: {:?}", e);
-                                                        break;
-                                                    }
-                                                }
-                                            }
+                                        let db_lock = db.lock().await;
+                                        while *db_lock.ack_counter.lock().await < num_slaves {
+                                            tokio::time::sleep(Duration::from_millis(10)).await;
                                         }
                                         Ok::<(), ()>(())
                                     }).await;
-
-                                    // Check the result of the wait
-                                    // Send the result back to the client
-                                    let response = match result {
-                                        Ok(_) => format!(":{}\r\n", responding_slaves),
-                                        Err(_) => format!(":0\r\n"), // Timeout or an error occurred
+                                
+                                    let response = {
+                                        let db_lock = db.lock().await;
+                                        let final_ack_count = *db_lock.ack_counter.lock().await;
+                                        match result {
+                                            Ok(_) => format!(":{}\r\n", final_ack_count),
+                                            Err(_) => format!(":0\r\n"), // Timeout
+                                        }
                                     };
 
-                                    let mut stream_lock = stream.lock().await;
-                                    stream_lock.write_all(response.as_bytes()).await?;
-                                    stream_lock.flush().await?;
+                                    writer.lock().await.write_all(response.as_bytes()).await?;
+                                    writer.lock().await.flush().await?;
+                                    let db_lock = db.lock().await;
+                                    let mut ack_counter_lock = db_lock.ack_counter.lock().await;
+                                    *ack_counter_lock = 0;
+                                    println!("reset Ack counter to {}", *ack_counter_lock);
                                 }
+                            } // Detect and handle "REPLCONF ACK" message
+                            else if response.contains("REPLCONF ACK") {
+                                // Increment the ack_counter inside the db
+                                let db_lock = db.lock().await;
+                                let mut ack_counter_lock = db_lock.ack_counter.lock().await;
+                                *ack_counter_lock += 1;
+                                println!("Received REPLCONF ACK. Ack counter incremented to {}", *ack_counter_lock);
                             } else if response.starts_with("+FULLRESYNC") {
                                 // Send the FULLRESYNC response
                                 {
-                                    let mut stream_lock = stream.lock().await;
+                                    let mut stream_lock = writer.lock().await;
                                     stream_lock.write_all(response.as_bytes()).await?;
                                     stream_lock.flush().await?;
                                 }
                                 // Send the RDB file to the client (slave)
                                 {
-                                    let mut stream_lock = stream.lock().await;
+                                    let mut stream_lock = writer.lock().await;
                                     send_rdb_file(&mut *stream_lock).await?;
                                     println!("Sent RDB file after FULLRESYNC");
                                 }
@@ -167,7 +161,7 @@ async fn handle_client(
                                 // Add the slave to the slave connections list
                                 {
                                     let db_lock = db.lock().await;
-                                    db_lock.slave_connections.write().await.push(Arc::clone(&stream));
+                                    db_lock.slave_connections.write().await.push(Arc::clone(&writer));
                                 }
                                 println!("Added new slave after FULLRESYNC");
 
@@ -175,7 +169,7 @@ async fn handle_client(
                                 // Write the response to the client
                                 println!("Sending response: {}", response);
                                 {
-                                    let mut stream_lock = stream.lock().await;
+                                    let mut stream_lock = writer.lock().await;
                                     stream_lock.write_all(response.as_bytes()).await?;
                                     stream_lock.flush().await?;
                                 }

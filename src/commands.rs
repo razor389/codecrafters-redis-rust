@@ -1,6 +1,7 @@
 use crate::database::{RedisDatabase, RedisValue, ReplicationInfoValue};
 use crate::parsing::parse_redis_message;
 use std::collections::HashMap;
+use tokio::net::tcp::OwnedWriteHalf;
 use tokio::sync::Mutex;
 use std::sync::Arc;
 use tokio::io::{self, AsyncWriteExt};
@@ -122,7 +123,7 @@ pub fn handle_psync(db: &RedisDatabase, args: &[String]) -> String {
 }
 
 // Asynchronously send the binary RDB file in RESP bulk string format
-pub async fn send_rdb_file(stream: &mut TcpStream) -> io::Result<()> {
+pub async fn send_rdb_file(stream: &mut OwnedWriteHalf) -> io::Result<()> {
     let hex_rdb = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
     let binary_data = hex_to_bytes(hex_rdb);
 
@@ -132,6 +133,7 @@ pub async fn send_rdb_file(stream: &mut TcpStream) -> io::Result<()> {
     // Send the length header and binary data asynchronously
     stream.write_all(length_header.as_bytes()).await?;
     stream.write_all(&binary_data).await?;
+    stream.flush().await?;
 
     Ok(())
 }

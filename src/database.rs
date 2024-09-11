@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::net::tcp::OwnedWriteHalf;
 use tokio::sync::{Mutex, RwLock};
-use tokio::net::TcpStream;
+
 use std::fmt;
 
 // Define the enum to store either a String or a u32
@@ -25,7 +26,8 @@ impl fmt::Display for ReplicationInfoValue {
 pub struct RedisDatabase {
     pub data: HashMap<String, RedisValue>,
     pub replication_info: HashMap<String, ReplicationInfoValue>, // Changed to use the enum
-    pub slave_connections: RwLock<Vec<Arc<Mutex<TcpStream>>>>, // Changed to store multiple slave connections
+    pub slave_connections: RwLock<Vec<Arc<Mutex<OwnedWriteHalf>>>>, // Changed to store multiple slave connections
+    pub ack_counter: Arc<Mutex<usize>>,
 }
 
 impl RedisDatabase {
@@ -35,6 +37,7 @@ impl RedisDatabase {
             data: HashMap::new(),
             replication_info: HashMap::new(),
             slave_connections: vec![].into(),
+            ack_counter: Arc::new(Mutex::new(0))
         }
     }
 
