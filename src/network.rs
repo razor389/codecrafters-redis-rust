@@ -182,11 +182,11 @@ async fn handle_client(
                                         send_rdb_file(&mut *stream_lock).await?;
                                         println!("Sent RDB file after FULLRESYNC");
                                     }
-                                
-                                    // Add the slave connection to the list of slaves
-                                    let mut db_lock = db.lock().await;
-                                    db_lock.slave_connections.push(Arc::clone(&stream));
-                                
+                                    {
+                                        // Add the slave connection to the list of slaves
+                                        let mut db_lock = db.lock().await;
+                                        db_lock.slave_connections.push(Arc::clone(&stream));
+                                    }
                                     println!("Added new slave after FULLRESYNC");
                                 } else {
                                     // Write the response to the client
