@@ -55,7 +55,6 @@ async fn handle_client(
         reader.read(&mut buffer).await
     })
     .await {
-        println!("read, dropping stream lock");
         match bytes_read {
             Ok(bytes_read) => {
                 if bytes_read == 0 {
@@ -141,6 +140,7 @@ async fn handle_client(
                             } // Detect and handle "REPLCONF ACK" message
                             else if response.contains("REPLCONF ACK") {
                                 // Increment the ack_counter inside the db
+                                println!("got replconf ack, waiting for db lock");
                                 let db_lock = db.lock().await;
                                 let mut ack_counter_lock = db_lock.ack_counter.lock().await;
                                 *ack_counter_lock += 1;
