@@ -202,10 +202,11 @@ async fn handle_client(
                             } else {
                                 // Write the response to the client
                                 println!("Sending response: {}", response);
-                                let mut stream_lock = stream.lock().await;
-                                stream_lock.write_all(response.as_bytes()).await?;
-                                stream_lock.flush().await?;
-
+                                {
+                                    let mut stream_lock = stream.lock().await;
+                                    stream_lock.write_all(response.as_bytes()).await?;
+                                    stream_lock.flush().await?;
+                                }
 
                                 // Forward the command to all connected slaves if applicable
                                 if let Some(cmd) = command {
