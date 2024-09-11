@@ -182,6 +182,7 @@ async fn handle_client(
                                     if should_forward_to_slaves(&cmd) {
                                         println!("Forwarding to slaves: {}", cmd);
                                         let mut db_lock = db.lock().await;
+                                        println!("got db lock to forward to slaves");
                                         // Forward the message to all connected slaves
                                         let slaves = {
                                             
