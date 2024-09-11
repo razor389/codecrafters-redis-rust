@@ -129,7 +129,7 @@ async fn handle_client(
                                     let timeout_duration = tokio::time::Duration::from_millis(timeout_ms);
                                     let result = tokio::time::timeout(timeout_duration, async {
                                         loop {
-                                            println!("locking ack counter");
+                                            //println!("locking ack counter");
                                             let ack_counter_value = {
                                                 // Only lock the ack_counter, not the whole db
                                                 let db_lock = db.lock().await;
@@ -137,7 +137,7 @@ async fn handle_client(
                                                 *ack_counter
                                             };
                                     
-                                            println!("current ack counter: {}", ack_counter_value);
+                                            //println!("current ack counter: {}", ack_counter_value);
                                             
                                             if ack_counter_value >= num_slaves {
                                                 break; // All required slaves have sent REPLCONF ACKs
