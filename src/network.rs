@@ -100,11 +100,7 @@ async fn handle_client(
                                             db_lock.slave_connections.read().await.clone() // Clone slave connections list
                                         };
 
-                                        for slave_stream in &slaves {
-                                            let mut slave_stream = slave_stream.lock().await;
-                                            slave_stream.write_all(replconf_getack_message.as_bytes()).await?;
-                                            slave_stream.flush().await?;
-                                        }
+                                        
                                         if slaves.len() > 0{
                                             if let Some(ReplicationInfoValue::ByteValue(current_offset)) = db_lock.replication_info.get("master_repl_offset") {
                                                 let new_offset = current_offset + replconf_getack_byte_len;
@@ -118,6 +114,11 @@ async fn handle_client(
                                                     ReplicationInfoValue::ByteValue(replconf_getack_byte_len),
                                                 );
                                             }
+                                        }
+                                        for slave_stream in &slaves {
+                                            let mut slave_stream = slave_stream.lock().await;
+                                            slave_stream.write_all(replconf_getack_message.as_bytes()).await?;
+                                            slave_stream.flush().await?;
                                         }
                                     }
                                     // Wait for REPLCONF ACKs or timeout
@@ -152,6 +153,7 @@ async fn handle_client(
                                 // Increment the ack_counter inside the db
                                 println!("got replconf ack, waiting for db lock");
                                 let db_lock = db.lock().await;
+                                println!("got db lock, waiting for arc counter lock");
                                 let mut ack_counter_lock = db_lock.ack_counter.lock().await;
                                 *ack_counter_lock += 1;
                                 println!("Received REPLCONF ACK. Ack counter incremented to {}", *ack_counter_lock);
