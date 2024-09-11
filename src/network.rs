@@ -126,7 +126,7 @@ async fn handle_client(
                                     let result = tokio::time::timeout(timeout_duration, async {
                                         let db_lock = db.lock().await;
                                         while *db_lock.ack_counter.lock().await < num_slaves {
-                                            tokio::time::sleep(Duration::from_millis(1)).await;
+                                            tokio::time::sleep(Duration::from_millis(50)).await;
                                         }
                                         Ok::<(), ()>(())
                                     }).await;
