@@ -97,7 +97,9 @@ async fn handle_client(
 
                                     // Send REPLCONF GETACK * to all slaves via broadcast
                                     {
+                                        println!("trying to get db lock for replconf getack");
                                         let db_lock = db.lock().await;
+                                        println!("got db lock for replconf getack");
                                         db_lock.broadcaster.send(replconf_getack_message.to_string()).expect("Failed to broadcast REPLCONF GETACK");
                                     }
 
