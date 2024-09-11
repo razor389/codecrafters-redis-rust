@@ -167,32 +167,6 @@ async fn handle_client(
                                     let db_lock = db.lock().await;
                                     db_lock.slave_connections.write().await.push(Arc::clone(&stream));
                                 }
-
-                                 // Spawn task to listen for REPLCONF ACK from this slave
-                                let stream_clone_for_ack = Arc::clone(&stream); // Clone again for ACK handling
-                                tokio::spawn(async move {
-                                    let mut buf = vec![0; 512];
-                                    loop {
-                                        let mut stream_lock = stream_clone_for_ack.lock().await;
-                                        match stream_lock.read(&mut buf).await {
-                                            Ok(n) if n == 0 => {
-                                                println!("Slave disconnected");
-                                                break;
-                                            }
-                                            Ok(n) => {
-                                                let response = String::from_utf8_lossy(&buf[..n]);
-                                                if response.contains("REPLCONF ACK") {
-                                                    println!("Received REPLCONF ACK from slave");
-                                                    // Handle ACK (e.g., update replication info)
-                                                }
-                                            }
-                                            Err(e) => {
-                                                eprintln!("Error reading from slave: {:?}", e);
-                                                break;
-                                            }
-                                        }
-                                    }
-                                });
                                 println!("Added new slave after FULLRESYNC");
                             } else {
                                 // Write the response to the client
