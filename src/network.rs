@@ -128,13 +128,25 @@ async fn handle_client(
                                     // Wait for REPLCONF ACKs or timeout
                                     let timeout_duration = tokio::time::Duration::from_millis(timeout_ms);
                                     let result = tokio::time::timeout(timeout_duration, async {
-                                        println!("waiting to lock db in ack counter");
-                                        let db_lock = db.lock().await;
-                                        println!("locked db in ack counter");
-                                        while *db_lock.ack_counter.lock().await < num_slaves {
+                                        loop {
+                                            println!("locking ack counter");
+                                            let ack_counter_value = {
+                                                // Only lock the ack_counter, not the whole db
+                                                let db_lock = db.lock().await;
+                                                let ack_counter = db_lock.ack_counter.lock().await;
+                                                *ack_counter
+                                            };
+                                    
+                                            println!("current ack counter: {}", ack_counter_value);
+                                            
+                                            if ack_counter_value >= num_slaves {
+                                                break; // All required slaves have sent REPLCONF ACKs
+                                            }
+                                    
+                                            // Sleep briefly before checking again
                                             tokio::time::sleep(Duration::from_millis(50)).await;
                                         }
-                                        println!("released db lock in ack counter");
+                                        println!("finished waiting for ACKs");
                                         Ok::<(), ()>(())
                                     }).await;
                                 
