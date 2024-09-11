@@ -214,7 +214,6 @@ async fn handle_client(
 
                                         // Broadcast the message to all slaves
                                         let mut db_lock = db.lock().await;
-                                        println!("acquired db lock");
                                         db_lock.broadcaster.send(current_message.clone()).expect("Failed to broadcast message");
 
                                         // Increment the master_repl_offset only once for the total bytes sent

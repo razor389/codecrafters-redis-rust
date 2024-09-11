@@ -157,9 +157,12 @@ pub async fn process_commands_after_rdb(
     config_map: &HashMap<String, String>,
     stream: &mut TcpStream,  // Added to send a response back to master
 ) -> io::Result<()> {
-    let mut db_lock = db.lock().await;
+    
 
-    let parsed_results = parse_redis_message(&partial_message, &mut db_lock, config_map);
+    let parsed_results = {
+        let mut db_lock = db.lock().await;
+        parse_redis_message(&partial_message, &mut db_lock, config_map)
+    };
 
     for (command, args, response, _cursor, command_msg_length_bytes) in parsed_results {
         let partial_message_bytes = partial_message.as_bytes();
@@ -185,6 +188,7 @@ pub async fn process_commands_after_rdb(
                     if args.len() >= 2 {
                         let key = args[0].clone();
                         let value = args[1].clone();
+                        let mut db_lock = db.lock().await;
                         db_lock.insert(key.clone(), RedisValue::new(value.clone(), None));
                     }
                 },
