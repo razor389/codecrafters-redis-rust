@@ -95,8 +95,9 @@ async fn handle_client(
                                     let timeout_ms = args[1].parse::<u64>().unwrap_or(0);
                                     println!("timeout ms: {}", timeout_ms);
                                     {   
-                                        println!("locking db to write getack to slave streams");
+                                        println!("waiting to lock db to write getack to slave streams");
                                         let mut db_lock = db.lock().await;
+                                        println!("locked db to write getack to slave streams");
                                         // Send REPLCONF GETACK * to all connected slaves
                                         let slaves = {
                                             db_lock.slave_connections.read().await.clone() // Clone slave connections list
@@ -127,10 +128,13 @@ async fn handle_client(
                                     // Wait for REPLCONF ACKs or timeout
                                     let timeout_duration = tokio::time::Duration::from_millis(timeout_ms);
                                     let result = tokio::time::timeout(timeout_duration, async {
+                                        println!("waiting to lock db in ack counter");
                                         let db_lock = db.lock().await;
+                                        println!("locked db in ack counter");
                                         while *db_lock.ack_counter.lock().await < num_slaves {
                                             tokio::time::sleep(Duration::from_millis(50)).await;
                                         }
+                                        println!("released db lock in ack counter");
                                         Ok::<(), ()>(())
                                     }).await;
                                 
