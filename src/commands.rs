@@ -1,6 +1,6 @@
 use crate::database::{RedisDatabase, RedisValue, RedisValueType, ReplicationInfoValue, StreamID};
 use crate::parsing::parse_redis_message;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::sync::Mutex;
 use std::sync::Arc;
@@ -54,7 +54,11 @@ pub fn handle_xadd(db: &mut RedisDatabase, args: &[String]) -> String {
     }
 
     let stream_key = &args[0];
-    let stream_id = &args[1];
+    let stream_id_str = &args[1];
+    let stream_id = match StreamID::from_str(stream_id_str) {
+        Some(id) => id,
+        None => return "-ERR invalid stream ID\r\n".to_string(),
+    };
 
     // Collect the key-value pairs for the stream entry
     let mut entry = HashMap::new();
@@ -65,21 +69,36 @@ pub fn handle_xadd(db: &mut RedisDatabase, args: &[String]) -> String {
     // Check if the stream already exists in the database
     if let Some(redis_value) = db.get(stream_key) {
         if let RedisValueType::StreamValue(stream) = redis_value.get_value() {
+            // Check if the stream has any entries
+            if let Some(last_id) = stream.keys().max() {
+                // Validate the new stream ID
+                if !stream_id.is_valid(last_id) {
+                    return "-ERR stream ID is not valid\r\n".to_string();
+                }
+            }
             let mut stream = stream.clone(); // Clone the stream to modify it
-            stream.insert(StreamID(stream_id.clone()), entry);
+            stream.insert(stream_id.clone(), entry);
             db.insert(stream_key.clone(), RedisValue::new(stream, None)); // Update the stream in the database
         } else {
             return "-ERR wrong type for 'xadd' command\r\n".to_string();
         }
     } else {
-        // Create a new stream if it doesn't exist
-        let mut stream = HashMap::new();
-        stream.insert(StreamID(stream_id.clone()), entry);
+        // Create a new stream if it doesn't exist and validate the ID against 0-0
+        let zero_id = StreamID {
+            milliseconds_time: 0,
+            sequence_number: 0,
+        };
+        if !stream_id.is_valid(&zero_id) {
+            return "-ERR stream ID is not valid\r\n".to_string();
+        }
+
+        let mut stream = BTreeMap::new();
+        stream.insert(stream_id.clone(), entry);
         db.insert(stream_key.clone(), RedisValue::new(stream, None));
     }
 
     // Return the stream_id as a RESP bulk string
-    format!("${}\r\n{}\r\n", stream_id.len(), stream_id)
+    format!("${}\r\n{}\r\n", stream_id_str.len(), stream_id_str)
 }
 
 

@@ -1,10 +1,65 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::sync::{Mutex, RwLock};
-
 use std::fmt;
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, HashMap};
+
+// Define the StreamID struct
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct StreamID {
+    pub milliseconds_time: u64,  // The first part of the ID
+    pub sequence_number: u64,    // The second part of the ID
+}
+
+impl StreamID {
+    // Parse a string like "12345-1" into a StreamID
+    pub fn from_str(id_str: &str) -> Option<StreamID> {
+        let parts: Vec<&str> = id_str.split('-').collect();
+        if parts.len() != 2 {
+            return None;
+        }
+        let milliseconds_time = parts[0].parse::<u64>().ok()?;
+        let sequence_number = parts[1].parse::<u64>().ok()?;
+        Some(StreamID {
+            milliseconds_time,
+            sequence_number,
+        })
+    }
+
+    // Compare the new stream ID with the last stream ID for validation
+    pub fn is_valid(&self, last_id: &StreamID) -> bool {
+        if self.milliseconds_time > last_id.milliseconds_time {
+            return true;
+        } else if self.milliseconds_time == last_id.milliseconds_time {
+            return self.sequence_number > last_id.sequence_number;
+        }
+        false
+    }
+}
+
+// Implement Ord and PartialOrd to allow ordering in BTreeMap
+impl Ord for StreamID {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self.milliseconds_time.cmp(&other.milliseconds_time) {
+            Ordering::Equal => self.sequence_number.cmp(&other.sequence_number),
+            other => other,
+        }
+    }
+}
+
+impl PartialOrd for StreamID {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl fmt::Display for StreamID {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}-{}", self.milliseconds_time, self.sequence_number)
+    }
+}
 
 // Define the enum to store either a String or a u32
 #[derive(Debug)]
@@ -70,16 +125,13 @@ enum TtlState {
     Expired,
 }
 
-// Define the StreamKey type
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct StreamID(pub String);
-
 // Define the value that Redis can hold
 #[derive(Debug)]
 pub enum RedisValueType {
     StringValue(String),
-    StreamValue(HashMap<StreamID, HashMap<String, String>>), // Stream is a HashMap of HashMaps
+    StreamValue(BTreeMap<StreamID, HashMap<String, String>>), // Stream is now a BTreeMap for ordered entries
 }
+
 
 #[derive(Debug)]
 pub struct RedisValue {
@@ -132,21 +184,9 @@ impl From<String> for RedisValueType {
     }
 }
 
-// Implement the conversion from HashMap<String, HashMap<String, String>> to RedisValueType
-impl From<HashMap<String, HashMap<String, String>>> for RedisValueType {
-    fn from(stream: HashMap<String, HashMap<String, String>>) -> Self {
-        // Convert the HashMap<String, HashMap<String, String>> to HashMap<StreamID, HashMap<String, String>>
-        let stream_converted: HashMap<StreamID, HashMap<String, String>> = stream
-            .into_iter()
-            .map(|(k, v)| (StreamID(k), v))
-            .collect();
-        RedisValueType::StreamValue(stream_converted)
-    }
-}
-
 // Implement the conversion from HashMap<StreamID, HashMap<String, String>> to RedisValueType
-impl From<HashMap<StreamID, HashMap<String, String>>> for RedisValueType {
-    fn from(stream: HashMap<StreamID, HashMap<String, String>>) -> Self {
+impl From<BTreeMap<StreamID, HashMap<String, String>>> for RedisValueType {
+    fn from(stream: BTreeMap<StreamID, HashMap<String, String>>) -> Self {
         RedisValueType::StreamValue(stream)
     }
 }
@@ -163,15 +203,17 @@ impl RedisValueType {
 impl fmt::Display for RedisValueType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            RedisValueType::StringValue(s) => write!(f, "{}", s),
+            RedisValueType::StringValue(s) => {
+                write!(f, "{}", s)
+            }
             RedisValueType::StreamValue(map) => {
-                write!(f, "{{")?;
+                write!(f, "{{\n")?;
                 for (key, inner_map) in map {
-                    write!(f, "{}: {{", key.0)?; // Accessing the inner string of StreamID
+                    write!(f, "  {}: {{\n", key)?; // StreamID's Display will handle key
                     for (k, v) in inner_map {
-                        write!(f, "{}: {}, ", k, v)?;
+                        write!(f, "    {}: {},\n", k, v)?; // Indent key-value pairs
                     }
-                    write!(f, "}}, ")?;
+                    write!(f, "  }},\n")?;
                 }
                 write!(f, "}}")
             }
