@@ -90,8 +90,6 @@ pub fn handle_xadd(db: &mut RedisDatabase, args: &[String]) -> String {
         }
     };
 
-    println!("stream id: {}", stream_id);
-
     // Check if the stream_id is greater than 0-0
     let zero_id = StreamID::zero();
     if !stream_id.is_valid(&zero_id) {
@@ -128,7 +126,7 @@ pub fn handle_xadd(db: &mut RedisDatabase, args: &[String]) -> String {
     }
 
     // Return the stream_id as a RESP bulk string
-    format!("${}\r\n{}\r\n", stream_id_str.len(), stream_id_str)
+    format!("${}\r\n{}\r\n", stream_id.to_string().len(), stream_id)
 }
 
 
