@@ -79,7 +79,7 @@ pub fn handle_xadd(db: &mut RedisDatabase, args: &[String]) -> String {
         } else {
             StreamID {
                 milliseconds_time: time_part,
-                sequence_number: 0,
+                sequence_number: if time_part == 0 { 1 } else { 0 },
             } // No entries, so sequence number starts at 0
         }
     } else {
