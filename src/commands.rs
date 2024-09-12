@@ -35,6 +35,16 @@ pub fn handle_get(db: &mut RedisDatabase, args: &[String]) -> String {
     }
 }
 
+// Handle the TYPE command
+pub fn handle_type(db: &RedisDatabase, args: &[String]) -> String {
+    if let Some(_redis_value) = db.get(&args[0]) {
+        // For now, we only handle String values
+        "+string\r\n".to_string()
+    } else {
+        "+none\r\n".to_string()
+    }
+}
+
 // Handle the KEYS command
 pub fn handle_keys(db: &RedisDatabase) -> String {
     let keys: Vec<&String> = db.data.keys().collect();
