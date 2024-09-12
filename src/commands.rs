@@ -89,6 +89,9 @@ pub fn handle_xadd(db: &mut RedisDatabase, args: &[String]) -> String {
             None => return "-ERR invalid stream ID\r\n".to_string(),
         }
     };
+
+    println!("stream id: {}", stream_id);
+
     // Check if the stream_id is greater than 0-0
     let zero_id = StreamID::zero();
     if !stream_id.is_valid(&zero_id) {
