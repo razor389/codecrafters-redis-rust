@@ -37,18 +37,27 @@ impl StreamID {
         milliseconds_time: u64,
         stream: &BTreeMap<StreamID, HashMap<String, String>>,
     ) -> Self {
-        let sequence_number = stream
-            .iter()
-            .rev()
-            .find(|(id, _)| id.milliseconds_time == milliseconds_time)
-            .map_or(0, |(id, _)| id.sequence_number + 1);
+        // For time 0, the first sequence number must be 1 (since 0-0 is not allowed)
+        let sequence_number = if milliseconds_time == 0 {
+            stream
+                .iter()
+                .rev()
+                .find(|(id, _)| id.milliseconds_time == 0)
+                .map_or(1, |(id, _)| id.sequence_number + 1)
+        } else {
+            stream
+                .iter()
+                .rev()
+                .find(|(id, _)| id.milliseconds_time == milliseconds_time)
+                .map_or(0, |(id, _)| id.sequence_number + 1)
+        };
 
         StreamID {
             milliseconds_time,
             sequence_number,
         }
     }
-
+    
     // Parse a string like "12345-1" into a StreamID
     pub fn from_str(id_str: &str) -> Option<StreamID> {
         let parts: Vec<&str> = id_str.split('-').collect();
