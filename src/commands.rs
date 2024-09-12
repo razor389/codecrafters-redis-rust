@@ -1,4 +1,4 @@
-use crate::database::{RedisDatabase, RedisValue, ReplicationInfoValue};
+use crate::database::{RedisDatabase, RedisValue, RedisValueType, ReplicationInfoValue, StreamID};
 use crate::parsing::parse_redis_message;
 use std::collections::HashMap;
 use tokio::net::tcp::OwnedWriteHalf;
@@ -44,6 +44,42 @@ pub fn handle_type(db: &RedisDatabase, args: &[String]) -> String {
         "+none\r\n".to_string()
     }
 }
+
+// Handle the XADD command
+pub fn handle_xadd(db: &mut RedisDatabase, args: &[String]) -> String {
+    if args.len() < 4 || args.len() % 2 != 0 {
+        return "-ERR wrong number of arguments for 'xadd' command\r\n".to_string();
+    }
+
+    let stream_key = &args[0];
+    let stream_id = &args[1];
+
+    // Collect the key-value pairs for the stream entry
+    let mut entry = HashMap::new();
+    for i in (2..args.len()).step_by(2) {
+        entry.insert(args[i].clone(), args[i + 1].clone());
+    }
+
+    // Check if the stream already exists in the database
+    if let Some(redis_value) = db.get(stream_key) {
+        if let RedisValueType::StreamValue(stream) = redis_value.get_value() {
+            let mut stream = stream.clone(); // Clone the stream to modify it
+            stream.insert(StreamID(stream_id.clone()), entry);
+            db.insert(stream_key.clone(), RedisValue::new(stream, None)); // Update the stream in the database
+        } else {
+            return "-ERR wrong type for 'xadd' command\r\n".to_string();
+        }
+    } else {
+        // Create a new stream if it doesn't exist
+        let mut stream = HashMap::new();
+        stream.insert(StreamID(stream_id.clone()), entry);
+        db.insert(stream_key.clone(), RedisValue::new(stream, None));
+    }
+
+    // Return the stream_id as a RESP bulk string
+    format!("${}\r\n{}\r\n", stream_id.len(), stream_id)
+}
+
 
 // Handle the KEYS command
 pub fn handle_keys(db: &RedisDatabase) -> String {

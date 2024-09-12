@@ -70,15 +70,30 @@ enum TtlState {
     Expired,
 }
 
+// Define the StreamKey type
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct StreamID(pub String);
+
+// Define the value that Redis can hold
+#[derive(Debug)]
+pub enum RedisValueType {
+    StringValue(String),
+    StreamValue(HashMap<StreamID, HashMap<String, String>>), // Stream is a HashMap of HashMaps
+}
+
 #[derive(Debug)]
 pub struct RedisValue {
-    value: String,
+    value: RedisValueType,
     creation_time: Instant,
     ttl_state: Option<TtlState>,
 }
 
 impl RedisValue {
-    pub fn new(value: String, ttl_millis: Option<u64>) -> Self {
+    // New constructor that handles both String and Stream types
+    pub fn new<V>(value: V, ttl_millis: Option<u64>) -> Self
+    where
+        V: Into<RedisValueType>,
+    {
         let ttl_state = ttl_millis.map(|ttl| {
             if ttl == 0 {
                 TtlState::Expired
@@ -88,7 +103,7 @@ impl RedisValue {
         });
 
         RedisValue {
-            value,
+            value: value.into(),
             creation_time: Instant::now(),
             ttl_state,
         }
@@ -105,7 +120,61 @@ impl RedisValue {
         }
     }
 
-    pub fn get_value(&self) -> &str {
+    pub fn get_value(&self) -> &RedisValueType  {
         &self.value
+    }
+}
+
+// Implement the conversion from String to RedisValueType
+impl From<String> for RedisValueType {
+    fn from(s: String) -> Self {
+        RedisValueType::StringValue(s)
+    }
+}
+
+// Implement the conversion from HashMap<String, HashMap<String, String>> to RedisValueType
+impl From<HashMap<String, HashMap<String, String>>> for RedisValueType {
+    fn from(stream: HashMap<String, HashMap<String, String>>) -> Self {
+        // Convert the HashMap<String, HashMap<String, String>> to HashMap<StreamID, HashMap<String, String>>
+        let stream_converted: HashMap<StreamID, HashMap<String, String>> = stream
+            .into_iter()
+            .map(|(k, v)| (StreamID(k), v))
+            .collect();
+        RedisValueType::StreamValue(stream_converted)
+    }
+}
+
+// Implement the conversion from HashMap<StreamID, HashMap<String, String>> to RedisValueType
+impl From<HashMap<StreamID, HashMap<String, String>>> for RedisValueType {
+    fn from(stream: HashMap<StreamID, HashMap<String, String>>) -> Self {
+        RedisValueType::StreamValue(stream)
+    }
+}
+
+impl RedisValueType {
+    pub fn len(&self) -> usize {
+        match self {
+            RedisValueType::StringValue(s) => s.len(),
+            RedisValueType::StreamValue(map) => map.len(),
+        }
+    }
+}
+
+impl fmt::Display for RedisValueType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RedisValueType::StringValue(s) => write!(f, "{}", s),
+            RedisValueType::StreamValue(map) => {
+                write!(f, "{{")?;
+                for (key, inner_map) in map {
+                    write!(f, "{}: {{", key.0)?; // Accessing the inner string of StreamID
+                    for (k, v) in inner_map {
+                        write!(f, "{}: {}, ", k, v)?;
+                    }
+                    write!(f, "}}, ")?;
+                }
+                write!(f, "}}")
+            }
+        }
     }
 }
