@@ -28,6 +28,13 @@ impl StreamID {
         })
     }
 
+    pub fn zero() -> Self {
+        StreamID {
+            milliseconds_time: 0,
+            sequence_number: 0,
+        }
+    }
+
     // Compare the new stream ID with the last stream ID for validation
     pub fn is_valid(&self, last_id: &StreamID) -> bool {
         if self.milliseconds_time > last_id.milliseconds_time {

@@ -60,6 +60,12 @@ pub fn handle_xadd(db: &mut RedisDatabase, args: &[String]) -> String {
         None => return "-ERR invalid stream ID\r\n".to_string(),
     };
 
+    // Check if the stream_id is greater than 0-0
+    let zero_id = StreamID::zero();
+    if !stream_id.is_valid(&zero_id) {
+        return "-ERR The ID specified in XADD must be greater than 0-0\r\n".to_string();
+    }
+
     // Collect the key-value pairs for the stream entry
     let mut entry = HashMap::new();
     for i in (2..args.len()).step_by(2) {
@@ -83,15 +89,7 @@ pub fn handle_xadd(db: &mut RedisDatabase, args: &[String]) -> String {
             return "-ERR wrong type for 'xadd' command\r\n".to_string();
         }
     } else {
-        // Create a new stream if it doesn't exist and validate the ID against 0-0
-        let zero_id = StreamID {
-            milliseconds_time: 0,
-            sequence_number: 0,
-        };
-        if !stream_id.is_valid(&zero_id) {
-            return "-ERR The ID specified in XADD must be greater than 0-0\r\n".to_string();
-        }
-
+        //create a new stream if it doesn't exist
         let mut stream = BTreeMap::new();
         stream.insert(stream_id.clone(), entry);
         db.insert(stream_key.clone(), RedisValue::new(stream, None));
