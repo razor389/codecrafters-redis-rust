@@ -37,9 +37,11 @@ pub fn handle_get(db: &mut RedisDatabase, args: &[String]) -> String {
 
 // Handle the TYPE command
 pub fn handle_type(db: &RedisDatabase, args: &[String]) -> String {
-    if let Some(_redis_value) = db.get(&args[0]) {
-        // For now, we only handle String values
-        "+string\r\n".to_string()
+    if let Some(redis_value) = db.get(&args[0]) {
+        match redis_value.get_value() {
+            RedisValueType::StringValue(_) => "+string\r\n".to_string(),
+            RedisValueType::StreamValue(_) => "+stream\r\n".to_string(),
+        }
     } else {
         "+none\r\n".to_string()
     }
