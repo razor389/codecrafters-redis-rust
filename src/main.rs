@@ -8,6 +8,7 @@ mod database;
 mod commands;
 mod parsing;
 mod rdb_parser;
+mod utils;
 
 use replication::initialize_replication;
 use network::start_server;
