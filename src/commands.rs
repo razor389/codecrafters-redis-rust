@@ -73,7 +73,7 @@ pub fn handle_xadd(db: &mut RedisDatabase, args: &[String]) -> String {
             if let Some(last_id) = stream.keys().max() {
                 // Validate the new stream ID
                 if !stream_id.is_valid(last_id) {
-                    return "-ERR stream ID is not valid\r\n".to_string();
+                    return "-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n".to_string();
                 }
             }
             let mut stream = stream.clone(); // Clone the stream to modify it
@@ -89,7 +89,7 @@ pub fn handle_xadd(db: &mut RedisDatabase, args: &[String]) -> String {
             sequence_number: 0,
         };
         if !stream_id.is_valid(&zero_id) {
-            return "-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n".to_string();
+            return "-ERR stream ID is not valid\r\n".to_string();
         }
 
         let mut stream = BTreeMap::new();
