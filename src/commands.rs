@@ -89,7 +89,7 @@ pub fn handle_xadd(db: &mut RedisDatabase, args: &[String]) -> String {
             sequence_number: 0,
         };
         if !stream_id.is_valid(&zero_id) {
-            return "-ERR stream ID is not valid\r\n".to_string();
+            return "-ERR The ID specified in XADD must be greater than 0-0\r\n".to_string();
         }
 
         let mut stream = BTreeMap::new();
