@@ -55,9 +55,39 @@ pub fn handle_xadd(db: &mut RedisDatabase, args: &[String]) -> String {
 
     let stream_key = &args[0];
     let stream_id_str = &args[1];
-    let stream_id = match StreamID::from_str(stream_id_str) {
-        Some(id) => id,
-        None => return "-ERR invalid stream ID\r\n".to_string(),
+
+    let stream_id = if stream_id_str == "*" {
+        // Fully generate the stream ID using the current time
+        if let Some(redis_value) = db.get(stream_key) {
+            if let RedisValueType::StreamValue(stream) = redis_value.get_value() {
+                StreamID::generate(stream)
+            } else {
+                return "-ERR wrong type for 'xadd' command\r\n".to_string();
+            }
+        } else {
+            StreamID::generate(&BTreeMap::new()) // Generate if stream does not exist
+        }
+    } else if stream_id_str.contains('-') && stream_id_str.ends_with("-*") {
+        // Partially generate stream ID, e.g., 1-*
+        let time_part = stream_id_str.trim_end_matches("-*").parse::<u64>().unwrap();
+        if let Some(redis_value) = db.get(stream_key) {
+            if let RedisValueType::StreamValue(stream) = redis_value.get_value() {
+                StreamID::generate_with_time(time_part, stream)
+            } else {
+                return "-ERR wrong type for 'xadd' command\r\n".to_string();
+            }
+        } else {
+            StreamID {
+                milliseconds_time: time_part,
+                sequence_number: 0,
+            } // No entries, so sequence number starts at 0
+        }
+    } else {
+        // Parse the full stream ID
+        match StreamID::from_str(stream_id_str) {
+            Some(id) => id,
+            None => return "-ERR invalid stream ID\r\n".to_string(),
+        }
     };
 
     // Check if the stream_id is greater than 0-0

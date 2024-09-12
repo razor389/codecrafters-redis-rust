@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::sync::{Mutex, RwLock};
 use std::fmt;
@@ -14,6 +14,41 @@ pub struct StreamID {
 }
 
 impl StreamID {
+    // Generate a StreamID with the current Unix time and a sequence number
+    pub fn generate(stream: &BTreeMap<StreamID, HashMap<String, String>>) -> Self {
+        let current_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_millis() as u64;
+        let sequence_number = stream
+            .iter()
+            .rev()
+            .find(|(id, _)| id.milliseconds_time == current_time)
+            .map_or(0, |(id, _)| id.sequence_number + 1);
+
+        StreamID {
+            milliseconds_time: current_time,
+            sequence_number,
+        }
+    }
+
+    // Generate a StreamID with the provided milliseconds_time and the first available sequence number
+    pub fn generate_with_time(
+        milliseconds_time: u64,
+        stream: &BTreeMap<StreamID, HashMap<String, String>>,
+    ) -> Self {
+        let sequence_number = stream
+            .iter()
+            .rev()
+            .find(|(id, _)| id.milliseconds_time == milliseconds_time)
+            .map_or(0, |(id, _)| id.sequence_number + 1);
+
+        StreamID {
+            milliseconds_time,
+            sequence_number,
+        }
+    }
+
     // Parse a string like "12345-1" into a StreamID
     pub fn from_str(id_str: &str) -> Option<StreamID> {
         let parts: Vec<&str> = id_str.split('-').collect();
