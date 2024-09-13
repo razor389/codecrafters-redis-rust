@@ -129,6 +129,86 @@ pub fn handle_xadd(db: &mut RedisDatabase, args: &[String]) -> String {
     format!("${}\r\n{}\r\n", stream_id.to_string().len(), stream_id)
 }
 
+// Handle the XRANGE command
+pub fn handle_xrange(db: &RedisDatabase, args: &[String]) -> String {
+    // Check if we have the correct number of arguments
+    if args.len() < 3 {
+        return "-ERR wrong number of arguments for 'xrange' command\r\n".to_string();
+    }
+
+    // Step 1: Retrieve the stream from the database
+    let stream_key = &args[0];
+    let redis_value = match db.get(stream_key) {
+        Some(value) => value,
+        None => return "-ERR no such key\r\n".to_string(),
+    };
+
+    // Ensure that the value is a stream
+    let stream = if let RedisValueType::StreamValue(ref stream) = redis_value.get_value() {
+        stream
+    } else {
+        return "-ERR wrong type for 'xrange' command\r\n".to_string();
+    };
+
+    // Step 2: Parse start and end StreamIDs
+    let start_id_str = &args[1];
+    let end_id_str = &args[2];
+
+    // Parse start StreamID (default to lowest if "-")
+    let start_id = if start_id_str == "-" {
+        StreamID::zero()  // Start from the minimum StreamID
+    } else {
+        match StreamID::from_str(start_id_str) {
+            Some(id) => id,
+            None => return "-ERR invalid start StreamID\r\n".to_string(),
+        }
+    };
+
+    // Parse end StreamID (default to highest if "+")
+    let end_id = if end_id_str == "+" {
+        StreamID {
+            milliseconds_time: u64::MAX,
+            sequence_number: u64::MAX,
+        }
+    } else {
+        match StreamID::from_str(end_id_str) {
+            Some(id) => id,
+            None => return "-ERR invalid end StreamID\r\n".to_string(),
+        }
+    };
+
+    // Step 3: Collect entries between start_id and end_id
+    let mut result = String::new();
+    let mut entry_count = 0;
+
+    for (stream_id, entry) in stream.range(start_id..=end_id) {
+        // Outer array for each stream entry: *2 (ID and key-value pairs)
+        result.push_str("*2\r\n");
+
+        // StreamID part: $<length>\r\n<stream_id>\r\n
+        let stream_id_str = stream_id.to_string();
+        result.push_str(&format!("${}\r\n{}\r\n", stream_id_str.len(), stream_id_str));
+
+        // Inner array for the key-value pairs: *<number of key-value pairs * 2>
+        result.push_str(&format!("*{}\r\n", entry.len() * 2));
+
+        // Append each field and value
+        for (field, value) in entry {
+            result.push_str(&format!("${}\r\n{}\r\n", field.len(), field));
+            result.push_str(&format!("${}\r\n{}\r\n", value.len(), value));
+        }
+
+        entry_count += 1;
+    }
+
+    // If no entries are found, return empty RESP array
+    if entry_count == 0 {
+        return "*0\r\n".to_string();
+    }
+
+    result
+}
+
 
 // Handle the KEYS command
 pub fn handle_keys(db: &RedisDatabase) -> String {
