@@ -270,7 +270,6 @@ pub async fn handle_xread(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> St
 
                 // Check if the stream ID is '$', which means we want to read new entries
                 let start_id = if start_id_str == "$" {
-                    println!("got $ start id str");
                     // Get the last stream ID if it exists, or default to a value that ensures blocking for new entries
                     match stream.iter().next_back()  {
                         Some((last_id, _)) => last_id.clone(),
@@ -338,7 +337,7 @@ pub async fn handle_xread(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> St
             }
 
             // Sleep for a small period before checking again (you can adjust this depending on how frequently you want to check)
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
         }
     };
 
