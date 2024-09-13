@@ -205,7 +205,7 @@ pub fn handle_xrange(db: &RedisDatabase, args: &[String]) -> String {
     if entry_count == 0 {
         return "*0\r\n".to_string();
     }
-
+    println!("xrange result: {}", result);
     result
 }
 
