@@ -220,6 +220,7 @@ pub async fn handle_xread(db: &RedisDatabase, args: &[String]) -> String {
             Ok(ms) => ms,
             Err(_) => return "-ERR invalid blocking timeout\r\n".to_string(),
         };
+        println!("blocking with wait time: {}", wait_time_ms);
         (true, wait_time_ms, 2)
     } else {
         (false, 0, 0)
@@ -328,7 +329,7 @@ pub async fn handle_xread(db: &RedisDatabase, args: &[String]) -> String {
     // Step 5: Handle timeout for blocking mode
     if is_blocking {
         match timeout(Duration::from_millis(wait_time_ms), blocking_task).await {
-            Ok(result) => result, // Return the result if data is found within the timeout
+            Ok(result) => {println!("data found within timeout: {}", result); result}, // Return the result if data is found within the timeout
             Err(_) => "$-1\r\n".to_string(), // Timeout expired, return null bulk string
         }
     } else {
