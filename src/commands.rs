@@ -250,6 +250,8 @@ pub async fn handle_xread(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> St
     // This is the async block for handling blocking logic and timeout
     let blocking_task = async {
         loop {
+            let mut found_new_entries = false; // Track if new entries were found for `$`-based streams
+
             for i in 1..=num_streams {
                 let stream_key = &args[args_start + i];
                 let start_id_str = &args[args_start + num_streams + i];
@@ -310,6 +312,11 @@ pub async fn handle_xread(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> St
                     }
 
                     entry_count += 1;
+
+                    // Mark that new entries were found if this is for the `$` case
+                    if start_id_str == "$" {
+                        found_new_entries = true;
+                    }
                 }
 
                 // If we collected any entries for this stream, add to the final result
@@ -325,7 +332,7 @@ pub async fn handle_xread(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> St
             }
 
             // If entries were found, return the result
-            if total_streams_with_entries > 0 {
+            if total_streams_with_entries > 0 || found_new_entries {
                 result.push_str(&format!("*{}\r\n", total_streams_with_entries)); // Number of streams with entries
                 result.push_str(&streams_data); // Append the stream data
                 return result;
