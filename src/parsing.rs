@@ -1,10 +1,12 @@
+use tokio::sync::Mutex;
 use crate::database::{RedisDatabase, ReplicationInfoValue};
 use crate::commands::{handle_config, handle_echo, handle_get, handle_info, handle_keys, handle_ping, handle_psync, handle_replconf, handle_set, handle_type, handle_xadd, handle_xrange, handle_xread};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 pub async fn parse_redis_message(
     message: &str,
-    db: &mut RedisDatabase,
+    db: &Arc<Mutex<RedisDatabase>>,
     config_map: &HashMap<String, String>,
 ) -> Vec<(Option<String>, Vec<String>, String, usize, usize)> {
     let mut results = Vec::new();
@@ -91,19 +93,19 @@ pub async fn parse_redis_message(
 
             // Handle the command once all args are collected
             let response = match command.as_deref() {
-                Some("SET") => handle_set(db, &args),
-                Some("GET") => handle_get(db, &args),
+                Some("SET") => handle_set(db, &args).await,
+                Some("GET") => handle_get(db, &args).await,
                 Some("CONFIG") => handle_config(config_map, &args),
-                Some("KEYS") => handle_keys(db),
+                Some("KEYS") => handle_keys(db).await,
                 Some("ECHO") => handle_echo(&args),
                 Some("PING") => handle_ping(&args),
-                Some("INFO") => handle_info(db, &args),
-                Some("REPLCONF") => handle_replconf(db,&args),
-                Some("PSYNC") => handle_psync(db, &args),
+                Some("INFO") => handle_info(db, &args).await,
+                Some("REPLCONF") => handle_replconf(db,&args).await,
+                Some("PSYNC") => handle_psync(db, &args).await,
                 Some("WAIT") => "".to_string(),
-                Some("TYPE") => handle_type(db, &args),
-                Some("XADD") => handle_xadd(db, &args),
-                Some("XRANGE") => handle_xrange(db, &args),
+                Some("TYPE") => handle_type(db, &args).await,
+                Some("XADD") => handle_xadd(db, &args).await,
+                Some("XRANGE") => handle_xrange(db, &args).await,
                 Some("XREAD") => handle_xread(db, &args).await,
                 _ => "-ERR unknown command\r\n".to_string(),
             };
@@ -111,10 +113,11 @@ pub async fn parse_redis_message(
             // Calculate the byte length of the entire command
             let byte_length = cursor - initial_cursor;
             // Incrementally update the bytes_processed
-            if let Some(ReplicationInfoValue::StringValue(role)) = db.get_replication_info("role") {
+            let mut db_lock = db.lock().await;
+            if let Some(ReplicationInfoValue::StringValue(role)) = db_lock.get_replication_info("role") {
                 if role == "slave" {
                     println!("updating slave repl offset");
-                    let cmd_bytes = match db.get_replication_info("slave_repl_offset") {
+                    let cmd_bytes = match db_lock.get_replication_info("slave_repl_offset") {
                         Some(ReplicationInfoValue::ByteValue(current_bytes)) => {
                             current_bytes + byte_length
                         }
@@ -122,7 +125,7 @@ pub async fn parse_redis_message(
                     };
             
                     // Update the replication info in the database
-                    db.update_replication_info(
+                    db_lock.update_replication_info(
                         "slave_repl_offset".to_string(),
                         ReplicationInfoValue::ByteValue(cmd_bytes),
                     );

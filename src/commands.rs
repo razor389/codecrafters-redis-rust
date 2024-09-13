@@ -9,7 +9,8 @@ use tokio::net::TcpStream;
 use tokio::time::{timeout, Duration};
 
 // Handle the SET command
-pub fn handle_set(db: &mut RedisDatabase, args: &[String]) -> String {
+pub async fn handle_set(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> String {
+    let mut db = db.lock().await;
     if args.len() == 2 {
         db.insert(args[0].clone(), RedisValue::new(args[1].clone(), None));
         "+OK\r\n".to_string()
@@ -23,7 +24,8 @@ pub fn handle_set(db: &mut RedisDatabase, args: &[String]) -> String {
 }
 
 // Handle the GET command
-pub fn handle_get(db: &mut RedisDatabase, args: &[String]) -> String {
+pub async fn handle_get(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> String {
+    let mut db = db.lock().await;
     if let Some(redis_value) = db.get(&args[0]) {
         if redis_value.is_expired() {
             db.remove(&args[0]);
@@ -37,7 +39,8 @@ pub fn handle_get(db: &mut RedisDatabase, args: &[String]) -> String {
 }
 
 // Handle the TYPE command
-pub fn handle_type(db: &RedisDatabase, args: &[String]) -> String {
+pub async fn handle_type(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> String {
+    let db = db.lock().await;
     if let Some(redis_value) = db.get(&args[0]) {
         match redis_value.get_value() {
             RedisValueType::StringValue(_) => "+string\r\n".to_string(),
@@ -49,11 +52,11 @@ pub fn handle_type(db: &RedisDatabase, args: &[String]) -> String {
 }
 
 // Handle the XADD command
-pub fn handle_xadd(db: &mut RedisDatabase, args: &[String]) -> String {
+pub async fn handle_xadd(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> String {
     if args.len() < 4 || args.len() % 2 != 0 {
         return "-ERR wrong number of arguments for 'xadd' command\r\n".to_string();
     }
-
+    let mut db = db.lock().await;
     let stream_key = &args[0];
     let stream_id_str = &args[1];
 
@@ -131,7 +134,7 @@ pub fn handle_xadd(db: &mut RedisDatabase, args: &[String]) -> String {
 }
 
 // Handle the XRANGE command
-pub fn handle_xrange(db: &RedisDatabase, args: &[String]) -> String {
+pub async fn handle_xrange(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> String {
     // Check if we have the correct number of arguments
     if args.len() < 3 {
         return "-ERR wrong number of arguments for 'xrange' command\r\n".to_string();
@@ -139,6 +142,7 @@ pub fn handle_xrange(db: &RedisDatabase, args: &[String]) -> String {
 
     // Step 1: Retrieve the stream from the database
     let stream_key = &args[0];
+    let db = db.lock().await;
     let redis_value = match db.get(stream_key) {
         Some(value) => value,
         None => return "-ERR no such key\r\n".to_string(),
@@ -213,7 +217,7 @@ pub fn handle_xrange(db: &RedisDatabase, args: &[String]) -> String {
     result
 }
 
-pub async fn handle_xread(db: &RedisDatabase, args: &[String]) -> String {
+pub async fn handle_xread(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> String {
     // Check if blocking mode is enabled
     let (is_blocking, wait_time_ms, args_start) = if args[0].to_uppercase() == "BLOCK" {
         let wait_time_ms = match args[1].parse::<u64>() {
@@ -241,17 +245,16 @@ pub async fn handle_xread(db: &RedisDatabase, args: &[String]) -> String {
 
     // Buffer to store all the streams' data
     let mut streams_data = String::new();
-    let mut i = 0;
+    
     // This is the async block for handling blocking logic and timeout
     let blocking_task = async {
         loop {
-            i += 1;
-            println!("loop iteration: {}" ,i);
             for i in 1..=num_streams {
                 let stream_key = &args[args_start + i];
                 let start_id_str = &args[args_start + num_streams + i];
 
                 // Retrieve the stream from the database
+                let db = db.lock().await;
                 let redis_value = match db.get(stream_key) {
                     Some(value) => value,
                     None => continue, // Skip if the key does not exist
@@ -340,7 +343,8 @@ pub async fn handle_xread(db: &RedisDatabase, args: &[String]) -> String {
 }
 
 // Handle the KEYS command
-pub fn handle_keys(db: &RedisDatabase) -> String {
+pub async fn handle_keys(db: &Arc<Mutex<RedisDatabase>>) -> String {
+    let db = db.lock().await;
     let keys: Vec<&String> = db.data.keys().collect();
     let mut response = format!("*{}\r\n", keys.len());
     for key in keys {
@@ -383,7 +387,8 @@ pub fn handle_ping(args: &[String]) -> String {
 }
 
 // Handle the INFO REPLICATION command
-pub fn handle_info(db: &RedisDatabase, args: &[String]) -> String {
+pub async fn handle_info(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> String {
+    let db = db.lock().await;
     if args.len() == 1 && args[0].to_uppercase() == "REPLICATION" {
         let mut response = String::new();
         for (key, value) in &db.replication_info {
@@ -396,7 +401,8 @@ pub fn handle_info(db: &RedisDatabase, args: &[String]) -> String {
 }
 
 // Handle the REPLCONF command
-pub fn handle_replconf(db: &RedisDatabase, args: &[String]) -> String {
+pub async fn handle_replconf(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> String {
+    let db = db.lock().await;
     if args.len() == 2 && args[0].to_uppercase() == "GETACK" && args[1] == "*" {
         let bytes_processed = match db.get_replication_info("slave_repl_offset") {
             Some(ReplicationInfoValue::ByteValue(bytes)) => *bytes,  // Dereference to get the usize value
@@ -410,7 +416,8 @@ pub fn handle_replconf(db: &RedisDatabase, args: &[String]) -> String {
 }
 
 // Handle the PSYNC command
-pub fn handle_psync(db: &RedisDatabase, args: &[String]) -> String {
+pub async fn handle_psync(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> String {
+    let db = db.lock().await;
     if args.len() == 2 {
         if let Some(master_replid) = db.replication_info.get("master_replid") {
             if let Some(master_repl_offset) = db.replication_info.get("master_repl_offset") {
@@ -466,8 +473,7 @@ pub async fn process_commands_after_rdb(
     
 
     let parsed_results = {
-        let mut db_lock = db.lock().await;
-        parse_redis_message(&partial_message, &mut db_lock, config_map).await
+        parse_redis_message(&partial_message, &db, config_map).await
     };
 
     for (command, args, response, _cursor, command_msg_length_bytes) in parsed_results {

@@ -76,8 +76,7 @@ async fn handle_client(
                         println!("Received Redis message in handle client: {}", current_message);
 
                         let parsed_results = {
-                            let mut db_lock = db.lock().await;
-                            parse_redis_message(&current_message, &mut db_lock, config_map).await
+                            parse_redis_message(&current_message, &db, config_map).await
                         };
 
                         for (command, args, response, _, _) in parsed_results {
