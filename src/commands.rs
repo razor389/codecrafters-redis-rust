@@ -218,7 +218,7 @@ pub async fn handle_xrange(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> S
 }
 
 pub async fn handle_xread(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> String {
-    println!("XREAD args: {:?}", args);
+    
     // Check if blocking mode is enabled
     let (is_blocking, wait_time_ms, args_start) = if args[0].to_uppercase() == "BLOCK" {
         let wait_time_ms = match args[1].parse::<u64>() {
@@ -246,15 +246,54 @@ pub async fn handle_xread(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> St
 
     // Buffer to store all the streams' data
     let mut streams_data = String::new();
+
+    // We need to resolve the correct start ID for all streams **before** entering the loop
+    let mut stream_start_ids: Vec<(String, StreamID)> = Vec::new();
+
+    for i in 1..=num_streams {
+        let stream_key = &args[args_start + i];
+        let start_id_str = &args[args_start + num_streams + i];
+
+        // Retrieve the stream from the database
+        let db = db.lock().await;
+        let redis_value = match db.get(stream_key) {
+            Some(value) => value,
+            None => continue, // Skip if the key does not exist
+        };
+
+        // Ensure that the value is a stream
+        let stream = if let RedisValueType::StreamValue(ref stream) = redis_value.get_value() {
+            stream
+        } else {
+            return format!("-ERR key '{}' is not a stream\r\n", stream_key);
+        };
+
+        // Resolve the start ID:
+        // - If the start ID is `$`, we want to wait for new entries after the last one.
+        // - Otherwise, parse the provided start ID as normal.
+        let start_id = if start_id_str == "$" {
+            // Get the last stream ID if it exists, or default to a value that ensures blocking for new entries
+            match stream.iter().next_back() {
+                Some((last_id, _)) => last_id.clone(),
+                None => StreamID::zero(), // No entries exist yet, so wait for the first entry
+            }
+        } else {
+            // Parse the start StreamID (exclusive)
+            match StreamID::from_str(start_id_str) {
+                Some(id) => id,
+                None => return format!("-ERR invalid StreamID '{}'\r\n", start_id_str),
+            }
+        };
+
+        // Store the resolved start ID for each stream
+        stream_start_ids.push((stream_key.clone(), start_id));
+    }
     
     // This is the async block for handling blocking logic and timeout
     let blocking_task = async {
         loop {
-            for i in 1..=num_streams {
-                let stream_key = &args[args_start + i];
-                let start_id_str = &args[args_start + num_streams + i];
-
-                // Retrieve the stream from the database
+            for (stream_key, start_id) in &stream_start_ids {
+                // Retrieve the stream from the database again
                 let db = db.lock().await;
                 let redis_value = match db.get(stream_key) {
                     Some(value) => value,
@@ -268,28 +307,13 @@ pub async fn handle_xread(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> St
                     return format!("-ERR key '{}' is not a stream\r\n", stream_key);
                 };
 
-                // Check if the stream ID is '$', which means we want to read new entries
-                let start_id = if start_id_str == "$" {
-                    // Get the last stream ID if it exists, or default to a value that ensures blocking for new entries
-                    match stream.iter().next_back()  {
-                        Some((last_id, _)) => last_id.clone(),
-                        None => StreamID::zero(), // No entries exist yet, so wait for the first entry
-                    }
-                } else {
-                    // Parse the start StreamID (exclusive)
-                    match StreamID::from_str(start_id_str) {
-                        Some(id) => id,
-                        None => return format!("-ERR invalid StreamID '{}'\r\n", start_id_str),
-                    }
-                };
-
                 let mut stream_entries = String::new();
                 let mut entry_count = 0;
 
-                // Step 3: Collect entries strictly larger than start_id
+                // Collect entries strictly larger than start_id
                 for (stream_id, entry) in stream.range(start_id..) {
                     // Only collect IDs strictly larger than the provided start_id
-                    if !stream_id.is_valid(&start_id) {
+                    if !stream_id.is_valid(start_id) {
                         continue;
                     }
 
@@ -323,7 +347,6 @@ pub async fn handle_xread(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> St
                     streams_data.push_str(&stream_entries);
                 }
             }
-
             // If entries were found, return the result
             if total_streams_with_entries > 0 {
                 result.push_str(&format!("*{}\r\n", total_streams_with_entries)); // Number of streams with entries
