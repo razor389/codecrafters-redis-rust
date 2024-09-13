@@ -322,7 +322,7 @@ pub async fn handle_xread(db: &RedisDatabase, args: &[String]) -> String {
             }
 
             // Sleep for a small period before checking again (you can adjust this depending on how frequently you want to check)
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
         }
     };
 
