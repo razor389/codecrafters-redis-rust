@@ -77,7 +77,7 @@ async fn handle_client(
 
                         let parsed_results = {
                             let mut db_lock = db.lock().await;
-                            parse_redis_message(&current_message, &mut db_lock, config_map)
+                            parse_redis_message(&current_message, &mut db_lock, config_map).await
                         };
 
                         for (command, args, response, _, _) in parsed_results {

@@ -6,6 +6,8 @@ use tokio::sync::Mutex;
 use std::sync::Arc;
 use tokio::io::{self, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::time::Duration;
+use std::time::Instant;
 
 // Handle the SET command
 pub fn handle_set(db: &mut RedisDatabase, args: &[String]) -> String {
@@ -212,14 +214,27 @@ pub fn handle_xrange(db: &RedisDatabase, args: &[String]) -> String {
     result
 }
 
-pub fn handle_xread(db: &RedisDatabase, args: &[String]) -> String {
-    // Step 1: Validate arguments
-    if args.is_empty() || args[0].to_uppercase() != "STREAMS" {
-        return "-ERR missing 'STREAMS' argument for 'xread' command\r\n".to_string();
+
+
+pub async fn handle_xread(db: &RedisDatabase, args: &[String]) -> String {
+    // Check if blocking mode is enabled
+    let (is_blocking, wait_time_ms, args_start) = if args[0].to_uppercase() == "BLOCK" {
+        let wait_time_ms = match args[1].parse::<u64>() {
+            Ok(ms) => ms,
+            Err(_) => return "-ERR invalid blocking timeout\r\n".to_string(),
+        };
+        (true, wait_time_ms, 2)
+    } else {
+        (false, 0, 0)
+    };
+
+    // Ensure the next argument is "STREAMS"
+    if args[args_start].to_uppercase() != "STREAMS" {
+        return "-ERR missing 'STREAMS' argument\r\n".to_string();
     }
 
-    let num_streams = (args.len() - 1) / 2; // Calculate the number of stream-key/start-id pairs
-    if args.len() < 3 || (args.len() - 1) % 2 != 0 {
+    let num_streams = (args.len() - (args_start + 1)) / 2; // Calculate the number of stream-key/start-id pairs
+    if args.len() < (args_start + 3) || (args.len() - (args_start + 1)) % 2 != 0 {
         return "-ERR wrong number of arguments for 'xread' command\r\n".to_string();
     }
 
@@ -229,81 +244,93 @@ pub fn handle_xread(db: &RedisDatabase, args: &[String]) -> String {
     // Buffer to store all the streams' data
     let mut streams_data = String::new();
 
-    // Step 2: Loop over each stream key and corresponding start_id
-    for i in 1..=num_streams {
-        let stream_key = &args[i];
-        let start_id_str = &args[num_streams + i];
+    let start_time = Instant::now(); // Start time for blocking timeout
 
-        // Retrieve the stream from the database
-        let redis_value = match db.get(stream_key) {
-            Some(value) => value,
-            None => continue, // Skip if the key does not exist
-        };
+    loop {
+        for i in 1..=num_streams {
+            let stream_key = &args[args_start + i];
+            let start_id_str = &args[args_start + num_streams + i];
 
-        // Ensure that the value is a stream
-        let stream = if let RedisValueType::StreamValue(ref stream) = redis_value.get_value() {
-            stream
-        } else {
-            return format!("-ERR key '{}' is not a stream\r\n", stream_key);
-        };
+            // Retrieve the stream from the database
+            let redis_value = match db.get(stream_key) {
+                Some(value) => value,
+                None => continue, // Skip if the key does not exist
+            };
 
-        // Parse the start StreamID (exclusive)
-        let start_id = match StreamID::from_str(start_id_str) {
-            Some(id) => id,
-            None => return format!("-ERR invalid StreamID '{}'\r\n", start_id_str),
-        };
+            // Ensure that the value is a stream
+            let stream = if let RedisValueType::StreamValue(ref stream) = redis_value.get_value() {
+                stream
+            } else {
+                return format!("-ERR key '{}' is not a stream\r\n", stream_key);
+            };
 
-        let mut stream_entries = String::new();
-        let mut entry_count = 0;
+            // Parse the start StreamID (exclusive)
+            let start_id = match StreamID::from_str(start_id_str) {
+                Some(id) => id,
+                None => return format!("-ERR invalid StreamID '{}'\r\n", start_id_str),
+            };
 
-        // Step 3: Collect entries strictly larger than start_id
-        for (stream_id, entry) in stream.range(start_id..) {
-            // Only collect IDs strictly larger than the provided start_id
-            if !stream_id.is_valid(&start_id) {
-                continue;
+            let mut stream_entries = String::new();
+            let mut entry_count = 0;
+
+            // Step 3: Collect entries strictly larger than start_id
+            for (stream_id, entry) in stream.range(start_id..) {
+                // Only collect IDs strictly larger than the provided start_id
+                if !stream_id.is_valid(&start_id) {
+                    continue;
+                }
+
+                // Create an array for each stream entry
+                stream_entries.push_str("*2\r\n");
+
+                // StreamID part: $<length>\r\n<stream_id>\r\n
+                let stream_id_str = stream_id.to_string();
+                stream_entries.push_str(&format!("${}\r\n{}\r\n", stream_id_str.len(), stream_id_str));
+
+                // Inner array for the key-value pairs: *<number of key-value pairs * 2>
+                stream_entries.push_str(&format!("*{}\r\n", entry.len() * 2));
+
+                // Append each field and value
+                for (field, value) in entry {
+                    stream_entries.push_str(&format!("${}\r\n{}\r\n", field.len(), field));
+                    stream_entries.push_str(&format!("${}\r\n{}\r\n", value.len(), value));
+                }
+
+                entry_count += 1;
             }
 
-            // Create an array for each stream entry
-            stream_entries.push_str("*2\r\n");
+            // If we collected any entries for this stream, add to the final result
+            if entry_count > 0 {
+                total_streams_with_entries += 1;
 
-            // StreamID part: $<length>\r\n<stream_id>\r\n
-            let stream_id_str = stream_id.to_string();
-            stream_entries.push_str(&format!("${}\r\n{}\r\n", stream_id_str.len(), stream_id_str));
-
-            // Inner array for the key-value pairs: *<number of key-value pairs * 2>
-            stream_entries.push_str(&format!("*{}\r\n", entry.len() * 2));
-
-            // Append each field and value
-            for (field, value) in entry {
-                stream_entries.push_str(&format!("${}\r\n{}\r\n", field.len(), field));
-                stream_entries.push_str(&format!("${}\r\n{}\r\n", value.len(), value));
+                // First, append the stream key and then append all collected entries
+                streams_data.push_str("*2\r\n");
+                streams_data.push_str(&format!("${}\r\n{}\r\n", stream_key.len(), stream_key));
+                streams_data.push_str(&format!("*{}\r\n", entry_count)); // Number of entries for this stream
+                streams_data.push_str(&stream_entries);
             }
-
-            entry_count += 1;
         }
 
-        // If we collected any entries for this stream, add to the final result
-        if entry_count > 0 {
-            total_streams_with_entries += 1;
-
-            // First, append the stream key and then append all collected entries
-            streams_data.push_str("*2\r\n");
-            streams_data.push_str(&format!("${}\r\n{}\r\n", stream_key.len(), stream_key));
-            streams_data.push_str(&format!("*{}\r\n", entry_count)); // Number of entries for this stream
-            streams_data.push_str(&stream_entries);
+        // If entries were found, return the result
+        if total_streams_with_entries > 0 {
+            result.push_str(&format!("*{}\r\n", total_streams_with_entries)); // Number of streams with entries
+            result.push_str(&streams_data); // Append the stream data
+            return result;
         }
+
+        // Step 4: If no entries were collected from any stream and it's not in blocking mode, return an empty array
+        if !is_blocking {
+            return "*0\r\n".to_string();
+        }
+
+        // Step 5: Check if we've exceeded the timeout (for blocking mode)
+        if start_time.elapsed().as_millis() >= wait_time_ms as u128 {
+            return "$-1\r\n".to_string(); // Timeout expired, return null bulk string
+        }
+
+        // Sleep a small amount of time before rechecking (you could also wait for a notification in a real-world scenario)
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
-
-    // Step 4: If no entries were collected from any stream, return an empty array
-    if total_streams_with_entries == 0 {
-        return "*0\r\n".to_string();
-    }
-
-    // Step 5: Prepend the total number of streams at the beginning
-    result.push_str(&format!("*{}\r\n", total_streams_with_entries)); // Number of streams with entries
-    result.push_str(&streams_data); // Append the stream data
-
-    result
 }
 
 
@@ -435,7 +462,7 @@ pub async fn process_commands_after_rdb(
 
     let parsed_results = {
         let mut db_lock = db.lock().await;
-        parse_redis_message(&partial_message, &mut db_lock, config_map)
+        parse_redis_message(&partial_message, &mut db_lock, config_map).await
     };
 
     for (command, args, response, _cursor, command_msg_length_bytes) in parsed_results {

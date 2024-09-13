@@ -2,7 +2,7 @@ use crate::database::{RedisDatabase, ReplicationInfoValue};
 use crate::commands::{handle_config, handle_echo, handle_get, handle_info, handle_keys, handle_ping, handle_psync, handle_replconf, handle_set, handle_type, handle_xadd, handle_xrange, handle_xread};
 use std::collections::HashMap;
 
-pub fn parse_redis_message(
+pub async fn parse_redis_message(
     message: &str,
     db: &mut RedisDatabase,
     config_map: &HashMap<String, String>,
@@ -104,7 +104,7 @@ pub fn parse_redis_message(
                 Some("TYPE") => handle_type(db, &args),
                 Some("XADD") => handle_xadd(db, &args),
                 Some("XRANGE") => handle_xrange(db, &args),
-                Some("XREAD") => handle_xread(db, &args),
+                Some("XREAD") => handle_xread(db, &args).await,
                 _ => "-ERR unknown command\r\n".to_string(),
             };
 
