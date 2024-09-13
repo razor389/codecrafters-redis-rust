@@ -267,10 +267,19 @@ pub async fn handle_xread(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> St
                     return format!("-ERR key '{}' is not a stream\r\n", stream_key);
                 };
 
-                // Parse the start StreamID (exclusive)
-                let start_id = match StreamID::from_str(start_id_str) {
-                    Some(id) => id,
-                    None => return format!("-ERR invalid StreamID '{}'\r\n", start_id_str),
+                // Check if the stream ID is '$', which means we want to read new entries
+                let start_id = if start_id_str == "$" {
+                    // Get the last stream ID if it exists, or default to a value that ensures blocking for new entries
+                    match stream.iter().next_back()  {
+                        Some((last_id, _)) => last_id.clone(),
+                        None => StreamID::zero(), // No entries exist yet, so wait for the first entry
+                    }
+                } else {
+                    // Parse the start StreamID (exclusive)
+                    match StreamID::from_str(start_id_str) {
+                        Some(id) => id,
+                        None => return format!("-ERR invalid StreamID '{}'\r\n", start_id_str),
+                    }
                 };
 
                 let mut stream_entries = String::new();
