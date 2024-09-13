@@ -333,9 +333,15 @@ pub async fn handle_xread(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> St
 
     // Step 5: Handle timeout for blocking mode
     if is_blocking {
-        match timeout(Duration::from_millis(wait_time_ms), blocking_task).await {
-            Ok(result) => {println!("data found within timeout: {}", result); result}, // Return the result if data is found within the timeout
-            Err(_) => {println!("timeout expired"); "$-1\r\n".to_string()}, // Timeout expired, return null bulk string
+        if wait_time_ms == 0 {
+            // BLOCK 0: Wait indefinitely
+            blocking_task.await
+        } else {
+            // Apply the timeout only if wait_time_ms > 0
+            match timeout(Duration::from_millis(wait_time_ms), blocking_task).await {
+                Ok(result) => {println!("data found within timeout: {}", result); result}, // Return the result if data is found within the timeout
+                Err(_) => {println!("timeout expired"); "$-1\r\n".to_string()}, // Timeout expired, return null bulk string
+            }
         }
     } else {
         blocking_task.await // If not blocking, just run the task normally
