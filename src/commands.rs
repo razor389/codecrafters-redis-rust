@@ -178,24 +178,24 @@ pub fn handle_xrange(db: &RedisDatabase, args: &[String]) -> String {
     };
 
     // Step 3: Collect entries between start_id and end_id
-    let mut result = String::new();
+    let mut entries = String::new();
     let mut entry_count = 0;
 
     for (stream_id, entry) in stream.range(start_id..=end_id) {
         // Outer array for each stream entry: *2 (ID and key-value pairs)
-        result.push_str("*2\r\n");
+        entries.push_str("*2\r\n");
 
         // StreamID part: $<length>\r\n<stream_id>\r\n
         let stream_id_str = stream_id.to_string();
-        result.push_str(&format!("${}\r\n{}\r\n", stream_id_str.len(), stream_id_str));
+        entries.push_str(&format!("${}\r\n{}\r\n", stream_id_str.len(), stream_id_str));
 
         // Inner array for the key-value pairs: *<number of key-value pairs * 2>
-        result.push_str(&format!("*{}\r\n", entry.len() * 2));
+        entries.push_str(&format!("*{}\r\n", entry.len() * 2));
 
         // Append each field and value
         for (field, value) in entry {
-            result.push_str(&format!("${}\r\n{}\r\n", field.len(), field));
-            result.push_str(&format!("${}\r\n{}\r\n", value.len(), value));
+            entries.push_str(&format!("${}\r\n{}\r\n", field.len(), field));
+            entries.push_str(&format!("${}\r\n{}\r\n", value.len(), value));
         }
 
         entry_count += 1;
@@ -205,7 +205,10 @@ pub fn handle_xrange(db: &RedisDatabase, args: &[String]) -> String {
     if entry_count == 0 {
         return "*0\r\n".to_string();
     }
-    println!("xrange result: {}", result);
+    let mut result = format!("*{}\r\n", entry_count); // Start with the total count
+    result.push_str(&entries); // Append all the entries
+
+    //println!("xrange result: {}", result);
     result
 }
 
