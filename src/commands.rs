@@ -241,10 +241,12 @@ pub async fn handle_xread(db: &RedisDatabase, args: &[String]) -> String {
 
     // Buffer to store all the streams' data
     let mut streams_data = String::new();
-
+    let mut i = 0;
     // This is the async block for handling blocking logic and timeout
     let blocking_task = async {
         loop {
+            i += 1;
+            println!("loop iteration: {}" ,i);
             for i in 1..=num_streams {
                 let stream_key = &args[args_start + i];
                 let start_id_str = &args[args_start + num_streams + i];
