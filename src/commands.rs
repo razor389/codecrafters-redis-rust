@@ -212,6 +212,100 @@ pub fn handle_xrange(db: &RedisDatabase, args: &[String]) -> String {
     result
 }
 
+pub fn handle_xread(db: &RedisDatabase, args: &[String]) -> String {
+    // Step 1: Validate arguments
+    if args.is_empty() || args[0].to_uppercase() != "STREAMS" {
+        return "-ERR missing 'STREAMS' argument for 'xread' command\r\n".to_string();
+    }
+
+    let num_streams = (args.len() - 1) / 2; // Calculate the number of stream-key/start-id pairs
+    if args.len() < 3 || (args.len() - 1) % 2 != 0 {
+        return "-ERR wrong number of arguments for 'xread' command\r\n".to_string();
+    }
+
+    let mut result = String::new();
+    let mut total_streams_with_entries = 0; // Track streams with entries
+
+    // Buffer to store all the streams' data
+    let mut streams_data = String::new();
+
+    // Step 2: Loop over each stream key and corresponding start_id
+    for i in 1..=num_streams {
+        let stream_key = &args[i];
+        let start_id_str = &args[num_streams + i];
+
+        // Retrieve the stream from the database
+        let redis_value = match db.get(stream_key) {
+            Some(value) => value,
+            None => continue, // Skip if the key does not exist
+        };
+
+        // Ensure that the value is a stream
+        let stream = if let RedisValueType::StreamValue(ref stream) = redis_value.get_value() {
+            stream
+        } else {
+            return format!("-ERR key '{}' is not a stream\r\n", stream_key);
+        };
+
+        // Parse the start StreamID (exclusive)
+        let start_id = match StreamID::from_str(start_id_str) {
+            Some(id) => id,
+            None => return format!("-ERR invalid StreamID '{}'\r\n", start_id_str),
+        };
+
+        let mut stream_entries = String::new();
+        let mut entry_count = 0;
+
+        // Step 3: Collect entries strictly larger than start_id
+        for (stream_id, entry) in stream.range(start_id..) {
+            // Only collect IDs strictly larger than the provided start_id
+            if !stream_id.is_valid(&start_id) {
+                continue;
+            }
+
+            // Create an array for each stream entry
+            stream_entries.push_str("*2\r\n");
+
+            // StreamID part: $<length>\r\n<stream_id>\r\n
+            let stream_id_str = stream_id.to_string();
+            stream_entries.push_str(&format!("${}\r\n{}\r\n", stream_id_str.len(), stream_id_str));
+
+            // Inner array for the key-value pairs: *<number of key-value pairs * 2>
+            stream_entries.push_str(&format!("*{}\r\n", entry.len() * 2));
+
+            // Append each field and value
+            for (field, value) in entry {
+                stream_entries.push_str(&format!("${}\r\n{}\r\n", field.len(), field));
+                stream_entries.push_str(&format!("${}\r\n{}\r\n", value.len(), value));
+            }
+
+            entry_count += 1;
+        }
+
+        // If we collected any entries for this stream, add to the final result
+        if entry_count > 0 {
+            total_streams_with_entries += 1;
+
+            // First, append the stream key and then append all collected entries
+            streams_data.push_str("*2\r\n");
+            streams_data.push_str(&format!("${}\r\n{}\r\n", stream_key.len(), stream_key));
+            streams_data.push_str(&format!("*{}\r\n", entry_count)); // Number of entries for this stream
+            streams_data.push_str(&stream_entries);
+        }
+    }
+
+    // Step 4: If no entries were collected from any stream, return an empty array
+    if total_streams_with_entries == 0 {
+        return "*0\r\n".to_string();
+    }
+
+    // Step 5: Prepend the total number of streams at the beginning
+    result.push_str(&format!("*{}\r\n", total_streams_with_entries)); // Number of streams with entries
+    result.push_str(&streams_data); // Append the stream data
+
+    result
+}
+
 
 // Handle the KEYS command
 pub fn handle_keys(db: &RedisDatabase) -> String {

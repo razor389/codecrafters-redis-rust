@@ -7,7 +7,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 
 // Define the StreamID struct
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct StreamID {
     pub milliseconds_time: u64,  // The first part of the ID
     pub sequence_number: u64,    // The second part of the ID
@@ -57,7 +57,7 @@ impl StreamID {
             sequence_number,
         }
     }
-    
+
     // Parse a string like "12345-1" into a StreamID
     pub fn from_str(id_str: &str) -> Option<StreamID> {
         let parts: Vec<&str> = id_str.split('-').collect();
