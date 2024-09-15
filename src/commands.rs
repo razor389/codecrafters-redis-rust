@@ -45,9 +45,45 @@ pub async fn handle_type(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> Str
         match redis_value.get_value() {
             RedisValueType::StringValue(_) => "+string\r\n".to_string(),
             RedisValueType::StreamValue(_) => "+stream\r\n".to_string(),
+            RedisValueType::IntegerValue(_) => "+integer\r\n".to_string(),
         }
     } else {
         "+none\r\n".to_string()
+    }
+}
+
+// Handle the INCR command
+pub async fn handle_incr(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> String {
+    if args.is_empty() {
+        return "-ERR wrong number of arguments\r\n".to_string();
+    }
+
+    let key = &args[0];
+    let mut db_lock = db.lock().await;
+
+    // Get the value from the database
+    match db_lock.get_mut(key) {
+        Some(redis_value) => {
+            match &mut redis_value.get_mut_value(){
+                RedisValueType::IntegerValue(ref mut int_value) => {
+                    // Increment the integer value by 1
+                    *int_value += 1;
+                    format!(":{}\r\n", int_value)
+                }
+                _ => {
+                    // The value exists but is not an integer
+                    "-ERR value is not an integer or out of range\r\n".to_string()
+                }
+            }
+        }
+        None => {
+            // Key doesn't exist, so we create it with a value of 1
+            db_lock.insert(
+                key.clone(),
+                RedisValue::new(RedisValueType::IntegerValue(1), None)
+            );
+            ":1\r\n".to_string()
+        }
     }
 }
 

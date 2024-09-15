@@ -1,6 +1,6 @@
 use tokio::sync::Mutex;
 use crate::database::{RedisDatabase, ReplicationInfoValue};
-use crate::commands::{handle_config, handle_echo, handle_get, handle_info, handle_keys, handle_ping, handle_psync, handle_replconf, handle_set, handle_type, handle_xadd, handle_xrange, handle_xread};
+use crate::commands::{handle_config, handle_echo, handle_get, handle_incr, handle_info, handle_keys, handle_ping, handle_psync, handle_replconf, handle_set, handle_type, handle_xadd, handle_xrange, handle_xread};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -107,6 +107,7 @@ pub async fn parse_redis_message(
                 Some("XADD") => handle_xadd(db, &args).await,
                 Some("XRANGE") => handle_xrange(db, &args).await,
                 Some("XREAD") => handle_xread(db, &args).await,
+                Some("INCR") => handle_incr(db, &args).await,
                 _ => "-ERR unknown command\r\n".to_string(),
             };
 

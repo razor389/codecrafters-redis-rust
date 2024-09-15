@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::sync::{Mutex, RwLock};
-use std::fmt;
+use std::fmt::{self, Debug};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 
@@ -155,6 +155,10 @@ impl RedisDatabase {
         self.data.get(key)
     }
 
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut RedisValue> {
+        self.data.get_mut(key)
+    }
+
     pub fn remove(&mut self, key: &str) {
         self.data.remove(key);
     }
@@ -179,6 +183,7 @@ enum TtlState {
 // Define the value that Redis can hold
 #[derive(Debug)]
 pub enum RedisValueType {
+    IntegerValue(u64),
     StringValue(String),
     StreamValue(BTreeMap<StreamID, HashMap<String, String>>), // Stream is now a BTreeMap for ordered entries
 }
@@ -226,6 +231,10 @@ impl RedisValue {
     pub fn get_value(&self) -> &RedisValueType  {
         &self.value
     }
+
+    pub fn get_mut_value(&mut self) -> &mut RedisValueType{
+        &mut self.value
+    }
 }
 
 // Implement the conversion from String to RedisValueType
@@ -245,6 +254,7 @@ impl From<BTreeMap<StreamID, HashMap<String, String>>> for RedisValueType {
 impl RedisValueType {
     pub fn len(&self) -> usize {
         match self {
+            RedisValueType::IntegerValue(integer) => {let int_str = integer.to_string(); int_str.len()},
             RedisValueType::StringValue(s) => s.len(),
             RedisValueType::StreamValue(map) => map.len(),
         }
@@ -254,6 +264,7 @@ impl RedisValueType {
 impl fmt::Display for RedisValueType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            RedisValueType::IntegerValue(integer) => {let int_str = integer.to_string(); write!(f, "{}", int_str)}
             RedisValueType::StringValue(s) => {
                 write!(f, "{}", s)
             }
