@@ -240,7 +240,12 @@ impl RedisValue {
 // Implement the conversion from String to RedisValueType
 impl From<String> for RedisValueType {
     fn from(s: String) -> Self {
-        RedisValueType::StringValue(s)
+        // Attempt to parse the string as a u64
+        if let Ok(int_value) = s.parse::<u64>() {
+            RedisValueType::IntegerValue(int_value)
+        } else {
+            RedisValueType::StringValue(s)
+        }
     }
 }
 
