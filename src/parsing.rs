@@ -230,18 +230,19 @@ async fn execute_queued_commands(
      let mut resp_array = format!("*{}\r\n", responses.len());
 
      for response in responses {
-         if response.starts_with('+') || response.starts_with('-') {
-             // Simple String (+OK) or Error (-ERR)
-             resp_array.push_str(&response);
-         } else if response.starts_with(':') {
-             // Integer Response
-             resp_array.push_str(&response);
-         } else {
-             // Bulk String Response
-             let length = response.len();
-             resp_array.push_str(&format!("${}\r\n{}\r\n", length, response));
-         }
-     }
+        if response.starts_with('+') || response.starts_with('-') {
+            // Simple String (+OK) or Error (-ERR)
+            resp_array.push_str(&response);
+        } else if response.starts_with(':') {
+            // Integer Response (e.g., ":1\r\n")
+            resp_array.push_str(&response);
+        } else {
+            // Bulk String Response (assumed if it's not simple or integer)
+            let content = response.trim();  // Ensure there's no extra \r\n in content
+            let length = content.len();
+            resp_array.push_str(&format!("${}\r\n{}\r\n", length, content));
+        }
+    }
     resp_array
 }
 
