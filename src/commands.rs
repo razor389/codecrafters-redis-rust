@@ -30,12 +30,20 @@ pub async fn handle_get(db: &Arc<Mutex<RedisDatabase>>, args: &[String]) -> Stri
     if let Some(redis_value) = db.get(&args[0]) {
         if redis_value.is_expired() {
             db.remove(&args[0]);
-            "$-1\r\n".to_string()
+            "$-1\r\n".to_string() // Key expired, return null bulk string
         } else {
-            format!("${}\r\n{}\r\n", redis_value.get_value().len(), redis_value.get_value())
+            match redis_value.get_value() {
+                RedisValueType::StringValue(s) => {
+                    format!("${}\r\n{}\r\n", s.len(), s)  // Proper bulk string formatting
+                }
+                RedisValueType::IntegerValue(i) => {
+                    format!(":{}\r\n", i)  // RESP integer formatting
+                }
+                _ => "$-1\r\n".to_string(),  // In case the type is unsupported (e.g., stream, etc.)
+            }
         }
     } else {
-        "$-1\r\n".to_string()
+        "$-1\r\n".to_string()  // Key not found, return null bulk string
     }
 }
 
