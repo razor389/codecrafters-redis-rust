@@ -226,11 +226,22 @@ async fn execute_queued_commands(
             responses.push(response);
         }
     }
-    // Format responses as a RESP array
-    let mut resp_array = format!("*{}\r\n", responses.len());
-    for response in responses {
-        resp_array.push_str(&format!("${}\r\n{}\r\n", response.len(), response));
-    }
+     // Format the responses as a RESP array
+     let mut resp_array = format!("*{}\r\n", responses.len());
+
+     for response in responses {
+         if response.starts_with('+') || response.starts_with('-') {
+             // Simple String (+OK) or Error (-ERR)
+             resp_array.push_str(&response);
+         } else if response.starts_with(':') {
+             // Integer Response
+             resp_array.push_str(&response);
+         } else {
+             // Bulk String Response
+             let length = response.len();
+             resp_array.push_str(&format!("${}\r\n{}\r\n", length, response));
+         }
+     }
     resp_array
 }
 
