@@ -105,9 +105,15 @@ pub async fn parse_redis_message(
                 }
                 Some("EXEC") => {
                     if client_state.in_transaction() {
-                        let responses = execute_queued_commands(client_state.get_multi_queue_ref(), db, config_map).await;
+                        let response = execute_queued_commands(client_state.get_multi_queue_ref(), db, config_map).await;
                         client_state.deactivate_multiqueue();
-                        results.extend(responses);
+                         // RESP array of responses from queued commands
+                        results.push((
+                            Some("EXEC".to_string()),
+                            vec![],
+                            response,
+                            0,
+                        ));
                     } else {
                         results.push((Some("EXEC".to_string()), vec![], "-ERR EXEC without MULTI\r\n".to_string(), 0));
                     }
@@ -192,8 +198,8 @@ async fn execute_queued_commands(
     queue: &Option<Vec<(String, Vec<String>)>>,
     db: &Arc<Mutex<RedisDatabase>>,
     config_map: &HashMap<String, String>,
-) -> Vec<(Option<String>, Vec<String>, String, usize)> {
-    let mut results = Vec::new();
+) -> String {
+    let mut responses = Vec::new();
 
     if let Some(commands) = queue {
         for (command, args) in commands {
@@ -217,10 +223,15 @@ async fn execute_queued_commands(
                 _ => "-ERR unknown command\r\n".to_string(),
             };
 
-            results.push((Some(command.clone()), args.clone(), response, 0));
+            responses.push(response);
         }
     }
-    results
+    // Format responses as a RESP array
+    let mut resp_array = format!("*{}\r\n", responses.len());
+    for response in responses {
+        resp_array.push_str(&format!("${}\r\n{}\r\n", response.len(), response));
+    }
+    resp_array
 }
 
 
