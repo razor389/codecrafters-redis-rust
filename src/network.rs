@@ -39,6 +39,37 @@ pub async fn start_server(config_map: HashMap<String, String>, db: Arc<Mutex<Red
     }
 }
 
+pub struct ClientState {
+    multi_queue: Option<Vec<(String, Vec<String>)>>, // Commands queued after MULTI
+    in_transaction: bool, // Whether the client is in MULTI/EXEC mode
+}
+
+impl ClientState {
+    pub fn new() -> Self{
+        ClientState{
+            multi_queue: None,
+            in_transaction: false,
+        }
+    }
+    pub fn in_transaction(&self) -> bool{
+        self.in_transaction
+    }
+    pub fn initialiaze_multiqueue(&mut self){
+        self.in_transaction = true;
+        self.multi_queue = Some(Vec::new());
+    }
+    pub fn deactivate_multiqueue(&mut self){
+        self.in_transaction = false;
+        self.multi_queue = None;
+    }
+    pub fn get_multi_queue_ref(&self) -> &Option<Vec<(String, Vec<String>)>>{
+        &self.multi_queue
+    }
+    pub fn get_mut_multi_queue_ref(&mut self) -> &mut Option<Vec<(String, Vec<String>)>>{
+        &mut self.multi_queue
+    }
+}
+
 async fn handle_client(
     stream: TcpStream,
     db: Arc<Mutex<RedisDatabase>>,
@@ -49,6 +80,7 @@ async fn handle_client(
     let mut buffer = vec![0; 4096];
     let mut partial_message = String::new();
     let mut has_sent_commands_to_slaves = false;
+    let mut client_state = ClientState::new();
 
     // Set the connection timeout duration (for example, 30 seconds)
     let connection_timeout = Duration::from_secs(30);
@@ -76,10 +108,10 @@ async fn handle_client(
                         println!("Received Redis message in handle client: {}", current_message);
 
                         let parsed_results = {
-                            parse_redis_message(&current_message, &db, config_map).await
+                            parse_redis_message(&current_message, &db, config_map, &mut client_state).await
                         };
 
-                        for (command, args, response, _, _) in parsed_results {
+                        for (command, args, response, _) in parsed_results {
                             let replconf_getack_message = "*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n";
                             let replconf_getack_byte_len = replconf_getack_message.as_bytes().len();
                             

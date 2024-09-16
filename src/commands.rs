@@ -1,4 +1,5 @@
 use crate::database::{RedisDatabase, RedisValue, RedisValueType, ReplicationInfoValue, StreamID};
+use crate::network::ClientState;
 use crate::parsing::parse_redis_message;
 use std::collections::{BTreeMap, HashMap};
 use tokio::net::tcp::OwnedWriteHalf;
@@ -546,12 +547,13 @@ pub async fn process_commands_after_rdb(
     stream: &mut TcpStream,  // Added to send a response back to master
 ) -> io::Result<()> {
     
+    let mut client_state = ClientState::new();
 
     let parsed_results = {
-        parse_redis_message(&partial_message, &db, config_map).await
+        parse_redis_message(&partial_message, &db, config_map, &mut client_state).await
     };
 
-    for (command, args, response, _cursor, command_msg_length_bytes) in parsed_results {
+    for (command, args, response, command_msg_length_bytes) in parsed_results {
         let partial_message_bytes = partial_message.as_bytes();
 
         if command_msg_length_bytes > partial_message_bytes.len() {
